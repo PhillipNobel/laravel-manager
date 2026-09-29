@@ -1,0 +1,743 @@
+#!/usr/bin/python3
+"""Narrow, root-owned Apache and Certbot manager for Ubuntu 24.04."""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import stat
+import subprocess
+import sys
+import tempfile
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+
+SETTINGS_FILE = Path("/etc/laravel-manager/apache.json")
+SITES_AVAILABLE = Path("/etc/apache2/sites-available")
+SITES_ENABLED = Path("/etc/apache2/sites-enabled")
+MODULES_AVAILABLE = Path("/etc/apache2/mods-available")
+MODULES_ENABLED = Path("/etc/apache2/mods-enabled")
+A2ENSITE = "/usr/sbin/a2ensite"
+A2DISSITE = "/usr/sbin/a2dissite"
+A2ENMOD = "/usr/sbin/a2enmod"
+APACHECTL = "/usr/sbin/apache2ctl"
+SYSTEMCTL = "/usr/bin/systemctl"
+CERTBOT = "/usr/bin/certbot"
+OPENSSL = "/usr/bin/openssl"
+LETSENCRYPT = Path("/etc/letsencrypt")
+CERTBOT_DEPLOY_HOOK = LETSENCRYPT / "renewal-hooks" / "deploy" / "laravel-manager-apache-reload"
+CERTBOT_DEPLOY_HOOK_CONTENT = "#!/bin/sh\nexec /usr/bin/systemctl reload apache2\n"
+SAFE_PATH = re.compile(r"\A/[A-Za-z0-9._/ -]+\Z")
+SAFE_SLUG = re.compile(r"\A[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
+SAFE_LABEL = re.compile(r"\A[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
+SAFE_EMAIL = re.compile(
+    r"\A[A-Za-z0-9._%+~-]+@"
+    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+\Z"
+)
+
+
+class HelperError(Exception):
+    pass
+
+
+def validate_slug(slug: str) -> None:
+    if len(slug) > 63 or not SAFE_SLUG.fullmatch(slug):
+        raise HelperError("Invalid application slug.")
+
+
+def validate_domain(domain: str) -> None:
+    labels = domain.lower().split(".")
+    if len(domain) > 253 or len(labels) < 2 or any(
+        not SAFE_LABEL.fullmatch(label) for label in labels
+    ):
+        raise HelperError("Invalid application domain.")
+
+
+def validate_document_root(document_root: str, slug: str) -> None:
+    path = Path(document_root)
+    if (
+        not path.is_absolute()
+        or ".." in path.parts
+        or str(path) != document_root
+        or not SAFE_PATH.fullmatch(document_root)
+        or path.name != "public"
+        or path.parent.name != slug
+    ):
+        raise HelperError("Invalid Laravel public directory.")
+
+
+def render_vhost(slug: str, domain: str, document_root: str, redirect_https: bool = False) -> str:
+    validate_slug(slug)
+    validate_domain(domain)
+    validate_document_root(document_root, slug)
+
+    redirect = ""
+    if redirect_https:
+        redirect = (
+            "\n    RewriteEngine On\n"
+            "    RewriteCond %{REQUEST_URI} !^/\\.well-known/acme-challenge/\n"
+            f"    RewriteRule ^ https://{domain}%{{REQUEST_URI}} [R=301,L,NE]\n"
+        )
+
+    return f"""<VirtualHost *:80>
+    ServerName {domain}
+    DocumentRoot "{document_root}"
+
+    <Directory "{document_root}">
+        Options FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>{redirect}
+
+    ErrorLog ${{APACHE_LOG_DIR}}/{slug}-error.log
+    CustomLog ${{APACHE_LOG_DIR}}/{slug}-access.log combined
+</VirtualHost>
+"""
+
+
+def render_ssl_vhost(slug: str, domain: str, document_root: str) -> str:
+    validate_slug(slug)
+    validate_domain(domain)
+    validate_document_root(document_root, slug)
+
+    certificate_directory = f"/etc/letsencrypt/live/{domain}"
+
+    return f"""<VirtualHost *:443>
+    ServerName {domain}
+    DocumentRoot "{document_root}"
+
+    <Directory "{document_root}">
+        Options FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+
+    SSLEngine on
+    SSLCertificateFile "{certificate_directory}/fullchain.pem"
+    SSLCertificateKeyFile "{certificate_directory}/privkey.pem"
+
+    ErrorLog ${{APACHE_LOG_DIR}}/{slug}-ssl-error.log
+    CustomLog ${{APACHE_LOG_DIR}}/{slug}-ssl-access.log combined
+</VirtualHost>
+"""
+
+
+def require_root() -> None:
+    if os.geteuid() != 0:
+        raise HelperError("Apache changes require the installed sudo rule.")
+
+
+def require_root_owned_regular_file(path: Path, writable_mask: int = 0o022) -> os.stat_result:
+    try:
+        info = path.lstat()
+    except OSError as error:
+        raise HelperError("Apache helper configuration or site file is unavailable.") from error
+
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & writable_mask:
+        raise HelperError("Apache helper configuration or site file has unsafe ownership or permissions.")
+
+    return info
+
+
+def require_root_owned_directory(path: Path) -> None:
+    try:
+        info = path.lstat()
+    except OSError as error:
+        raise HelperError("Apache site directories are unavailable.") from error
+
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+        raise HelperError("Apache site directories have unsafe ownership or permissions.")
+
+
+def read_site_file(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        raise HelperError("Apache site configuration could not be read.") from error
+
+
+def load_settings() -> tuple[str, Path]:
+    require_root_owned_regular_file(SETTINGS_FILE)
+    try:
+        settings = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise HelperError("Apache helper settings are invalid.") from error
+
+    if not isinstance(settings, dict) or set(settings) != {"base_domain", "applications_directory"}:
+        raise HelperError("Apache helper settings are invalid.")
+
+    base_domain = settings.get("base_domain")
+    applications_directory = settings.get("applications_directory")
+    if not isinstance(base_domain, str) or not isinstance(applications_directory, str):
+        raise HelperError("Apache helper settings are invalid.")
+
+    base_domain = base_domain.strip().lower().strip(".")
+    validate_domain(base_domain)
+
+    root = Path(applications_directory)
+    if (
+        not root.is_absolute()
+        or ".." in root.parts
+        or str(root) != applications_directory
+        or not SAFE_PATH.fullmatch(applications_directory)
+        or root == Path("/")
+        or not root.is_dir()
+        or root.resolve(strict=True) != root
+    ):
+        raise HelperError("Applications directory must be a real, absolute directory without symlinks.")
+
+    return base_domain, root
+
+
+def project_details(slug: str) -> tuple[str, Path]:
+    validate_slug(slug)
+    base_domain, applications_root = load_settings()
+    domain = f"{slug}.{base_domain}"
+    validate_domain(domain)
+
+    project_path = applications_root / slug
+    public_path = project_path / "public"
+    if (
+        project_path.is_symlink()
+        or public_path.is_symlink()
+        or not project_path.is_dir()
+        or not public_path.is_dir()
+        or project_path.resolve(strict=True) != project_path
+        or public_path.resolve(strict=True) != public_path
+    ):
+        raise HelperError("Laravel application public directory is missing or unsafe.")
+
+    return domain, public_path
+
+
+def run_command(command: list[str], name: str, timeout: int = 20) -> str:
+    try:
+        result = subprocess.run(
+            command,
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C", "LC_ALL": "C"},
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise HelperError(f"{name} could not complete.") from error
+
+    output = (result.stdout or "").strip()[-4000:]
+    if result.returncode != 0:
+        detail = f" {output}" if output else ""
+        raise HelperError(f"{name} failed.{detail}")
+
+    return output
+
+
+def require_site_directories() -> None:
+    require_root_owned_directory(SITES_AVAILABLE)
+    require_root_owned_directory(SITES_ENABLED)
+    require_root_owned_directory(MODULES_AVAILABLE)
+    require_root_owned_directory(MODULES_ENABLED)
+
+
+def module_enabled(name: str) -> bool:
+    module = MODULES_ENABLED / f"{name}.load"
+    if not module.is_symlink():
+        return False
+
+    try:
+        return module.resolve(strict=True) == (MODULES_AVAILABLE / f"{name}.load").resolve(strict=True)
+    except OSError:
+        return False
+
+
+def rewrite_enabled() -> bool:
+    return module_enabled("rewrite")
+
+
+def ssl_module_enabled() -> bool:
+    return module_enabled("ssl")
+
+
+def expected_site_config(filename: str, content: str) -> tuple[Path, bool]:
+    site_file = SITES_AVAILABLE / filename
+    try:
+        require_root_owned_regular_file(site_file)
+    except HelperError:
+        if os.path.lexists(site_file):
+            raise
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            file_descriptor = os.open(site_file, flags, 0o644)
+            with os.fdopen(file_descriptor, "w", encoding="utf-8") as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+        except OSError as error:
+            try:
+                site_file.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise HelperError("Apache site configuration could not be written.") from error
+
+        return site_file, True
+
+    if read_site_file(site_file) != content:
+        raise HelperError("An existing Apache site file differs from Laravel Manager's configuration.")
+
+    return site_file, False
+
+
+def enabled_site_name(site_name: str, site_file: Path) -> bool:
+    enabled_file = SITES_ENABLED / site_name
+    if not os.path.lexists(enabled_file):
+        return False
+    if not enabled_file.is_symlink():
+        raise HelperError("An unmanaged Apache site entry already uses this slug.")
+
+    try:
+        target = enabled_file.resolve(strict=True)
+    except OSError as error:
+        raise HelperError("Apache enabled-site link is broken.") from error
+
+    if target != site_file.resolve(strict=True):
+        raise HelperError("An unmanaged Apache site entry already uses this slug.")
+
+    return True
+
+
+def enabled_site(slug: str, site_file: Path) -> bool:
+    return enabled_site_name(f"{slug}.conf", site_file)
+
+
+def replace_managed_site_file(site_file: Path, expected: str, content: str) -> bool:
+    require_root_owned_regular_file(site_file)
+    if site_file.is_symlink():
+        raise HelperError("An unmanaged Apache site file already uses this slug.")
+
+    current = read_site_file(site_file)
+    if current == content:
+        return False
+    if current != expected:
+        raise HelperError("An existing Apache site file differs from Laravel Manager's configuration.")
+
+    temporary_path: Path | None = None
+    try:
+        file_descriptor, temporary_name = tempfile.mkstemp(prefix=f".{site_file.name}.", dir=site_file.parent)
+        temporary_path = Path(temporary_name)
+        os.fchown(file_descriptor, 0, 0)
+        os.fchmod(file_descriptor, 0o644)
+        with os.fdopen(file_descriptor, "w", encoding="utf-8") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary_path, site_file)
+        directory_descriptor = os.open(site_file.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
+    except OSError as error:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+        raise HelperError("Apache site configuration could not be updated.") from error
+
+    return True
+
+
+def certificate_material_exists(domain: str) -> bool:
+    live_directory = LETSENCRYPT / "live" / domain
+    return os.path.lexists(live_directory / "fullchain.pem") or os.path.lexists(live_directory / "privkey.pem")
+
+
+def certificate_expiry(domain: str) -> datetime | None:
+    live_directory = LETSENCRYPT / "live" / domain
+    archive_directory = LETSENCRYPT / "archive" / domain
+    fullchain = live_directory / "fullchain.pem"
+    private_key = live_directory / "privkey.pem"
+
+    if not certificate_material_exists(domain):
+        return None
+
+    for directory in (live_directory, archive_directory):
+        require_root_owned_directory(directory)
+
+    archive_real_path = archive_directory.resolve(strict=True)
+    for path in (fullchain, private_key):
+        try:
+            link_info = path.lstat()
+            target = path.resolve(strict=True)
+        except OSError as error:
+            raise HelperError("Let's Encrypt certificate files are incomplete.") from error
+
+        if not stat.S_ISLNK(link_info.st_mode) or link_info.st_uid != 0 or target.parent != archive_real_path:
+            raise HelperError("Let's Encrypt certificate files have an unsafe path.")
+
+        require_root_owned_regular_file(target)
+
+    run_command(
+        [OPENSSL, "x509", "-in", str(fullchain), "-noout", "-checkhost", domain],
+        "HTTPS certificate domain check",
+    )
+    output = run_command(
+        [OPENSSL, "x509", "-in", str(fullchain), "-noout", "-enddate"],
+        "HTTPS certificate expiry read",
+    )
+
+    if not output.startswith("notAfter="):
+        raise HelperError("Let's Encrypt certificate expiry could not be read.")
+
+    try:
+        expiry = datetime.strptime(output.removeprefix("notAfter="), "%b %d %H:%M:%S %Y %Z")
+    except ValueError as error:
+        raise HelperError("Let's Encrypt certificate expiry has an invalid format.") from error
+
+    return expiry.replace(tzinfo=timezone.utc)
+
+
+def ensure_certbot_reload_hook() -> None:
+    directories = (
+        LETSENCRYPT,
+        LETSENCRYPT / "renewal-hooks",
+        LETSENCRYPT / "renewal-hooks" / "deploy",
+    )
+
+    for directory in directories:
+        if not os.path.lexists(directory):
+            try:
+                directory.mkdir(mode=0o755)
+            except OSError as error:
+                raise HelperError("Certbot renewal hook directory could not be prepared.") from error
+
+        require_root_owned_directory(directory)
+
+    if os.path.lexists(CERTBOT_DEPLOY_HOOK):
+        require_root_owned_regular_file(CERTBOT_DEPLOY_HOOK)
+        if (
+            CERTBOT_DEPLOY_HOOK.read_text(encoding="utf-8") != CERTBOT_DEPLOY_HOOK_CONTENT
+            or not CERTBOT_DEPLOY_HOOK.stat().st_mode & 0o111
+        ):
+            raise HelperError("An existing Certbot deploy hook differs from Laravel Manager's reload hook.")
+
+        return
+
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        file_descriptor = os.open(CERTBOT_DEPLOY_HOOK, flags, 0o755)
+        with os.fdopen(file_descriptor, "w", encoding="utf-8") as stream:
+            stream.write(CERTBOT_DEPLOY_HOOK_CONTENT)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except OSError as error:
+        raise HelperError("Certbot deploy hook could not be installed.") from error
+
+
+def ssl_site_file(slug: str) -> Path:
+    return SITES_AVAILABLE / f"{slug}-le-ssl.conf"
+
+
+def ssl_site_enabled(slug: str, site_file: Path) -> bool:
+    return enabled_site_name(f"{slug}-le-ssl.conf", site_file)
+
+
+def ssl_status(slug: str, domain: str, public_path: Path) -> str:
+    site_file = ssl_site_file(slug)
+    enabled_file = SITES_ENABLED / site_file.name
+    has_certificate = certificate_material_exists(domain)
+    has_site_file = os.path.lexists(site_file)
+    has_enabled_link = os.path.lexists(enabled_file)
+
+    if not has_enabled_link:
+        if has_site_file:
+            expected_ssl_content = render_ssl_vhost(slug, domain, str(public_path))
+            require_root_owned_regular_file(site_file)
+            if read_site_file(site_file) != expected_ssl_content:
+                raise HelperError("An existing HTTPS site file differs from Laravel Manager's configuration.")
+
+        if has_certificate:
+            certificate_expiry(domain)
+
+        http_content = render_vhost(slug, domain, str(public_path))
+        if site_status(slug, domain, public_path, http_content, SITES_AVAILABLE / f"{slug}.conf") != "ACTIVE":
+            return "PENDING"
+
+        return "PENDING"
+
+    if not has_certificate or not has_site_file:
+        raise HelperError("HTTPS setup is incomplete. Retry HTTPS setup to finish it.")
+
+    certificate_end = certificate_expiry(domain)
+    if certificate_end is None:
+        raise HelperError("Let's Encrypt certificate is unavailable.")
+
+    expected_ssl_content = render_ssl_vhost(slug, domain, str(public_path))
+    require_root_owned_regular_file(site_file)
+    if read_site_file(site_file) != expected_ssl_content:
+        raise HelperError("An existing HTTPS site file differs from Laravel Manager's configuration.")
+    if not ssl_site_enabled(slug, site_file):
+        raise HelperError("Apache HTTPS site is not enabled.")
+    if not ssl_module_enabled():
+        raise HelperError("Apache mod_ssl is not enabled.")
+
+    http_content = render_vhost(slug, domain, str(public_path), redirect_https=True)
+    if site_status(slug, domain, public_path, http_content, SITES_AVAILABLE / f"{slug}.conf") != "ACTIVE":
+        return "PENDING"
+
+    if certificate_end <= datetime.now(timezone.utc):
+        return "EXPIRED|"+certificate_end.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    return "ACTIVE|"+certificate_end.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def enable_ssl(slug: str, domain: str, public_path: Path, email: str) -> str:
+    if len(email) > 254 or not SAFE_EMAIL.fullmatch(email):
+        raise HelperError("Invalid administrator email address.")
+
+    current_status = ssl_status(slug, domain, public_path)
+    if current_status.startswith("ACTIVE|"):
+        return current_status
+
+    http_site_file = SITES_AVAILABLE / f"{slug}.conf"
+    base_http_content = render_vhost(slug, domain, str(public_path))
+    redirect_http_content = render_vhost(slug, domain, str(public_path), redirect_https=True)
+    http_status_content = read_site_file(http_site_file) if os.path.lexists(http_site_file) else ""
+
+    if http_status_content not in {base_http_content, redirect_http_content}:
+        raise HelperError("Configure the managed Apache domain before enabling HTTPS.")
+    require_root_owned_regular_file(http_site_file)
+    if not enabled_site(slug, http_site_file) or not rewrite_enabled():
+        raise HelperError("Configure and verify the Apache domain before enabling HTTPS.")
+
+    run_command([APACHECTL, "configtest"], "Apache configuration validation")
+    run_command([SYSTEMCTL, "is-active", "--quiet", "apache2"], "Apache service status check")
+
+    current_expiry = certificate_expiry(domain)
+    if current_expiry is None or current_expiry <= datetime.now(timezone.utc) + timedelta(days=30):
+        run_command(
+            [
+                CERTBOT,
+                "certonly",
+                "--apache",
+                "--non-interactive",
+                "--agree-tos",
+                "--email",
+                email,
+                "--cert-name",
+                domain,
+                "--domain",
+                domain,
+            ],
+            "Let's Encrypt certificate request",
+            timeout=720,
+        )
+
+    certificate_end = certificate_expiry(domain)
+    if certificate_end is None:
+        raise HelperError("Certbot completed without creating the requested certificate.")
+
+    ensure_certbot_reload_hook()
+    run_command([A2ENMOD, "ssl"], "Apache SSL module enable")
+    if not ssl_module_enabled():
+        raise HelperError("Apache mod_ssl could not be enabled.")
+
+    expected_ssl_content = render_ssl_vhost(slug, domain, str(public_path))
+    https_site_file, created_ssl_file = expected_site_config(f"{slug}-le-ssl.conf", expected_ssl_content)
+    was_ssl_enabled = ssl_site_enabled(slug, https_site_file)
+    created_ssl_link = False
+    http_file_updated = False
+    reloaded = False
+
+    try:
+        if not was_ssl_enabled:
+            run_command([A2ENSITE, https_site_file.name], "Apache HTTPS site enable")
+            created_ssl_link = True
+
+        if not ssl_site_enabled(slug, https_site_file):
+            raise HelperError("Apache did not enable the requested HTTPS site.")
+
+        http_file_updated = replace_managed_site_file(
+            http_site_file,
+            base_http_content,
+            redirect_http_content,
+        )
+        run_command([APACHECTL, "configtest"], "Apache configuration validation")
+        run_command([APACHECTL, "graceful"], "Apache graceful reload")
+        reloaded = True
+        run_command([SYSTEMCTL, "is-active", "--quiet", "apache2"], "Apache service status check")
+    except HelperError:
+        if http_file_updated:
+            try:
+                replace_managed_site_file(http_site_file, redirect_http_content, base_http_content)
+            except HelperError:
+                pass
+        if created_ssl_link:
+            try:
+                run_command([A2DISSITE, https_site_file.name], "Apache HTTPS site rollback")
+            except HelperError:
+                pass
+        if created_ssl_file:
+            try:
+                if read_site_file(https_site_file) == expected_ssl_content:
+                    https_site_file.unlink()
+            except (OSError, HelperError):
+                pass
+        if reloaded:
+            try:
+                run_command([APACHECTL, "graceful"], "Apache HTTPS rollback reload")
+            except HelperError:
+                pass
+        raise
+
+    return "ACTIVE|"+certificate_end.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def remove_enabled_site(slug: str) -> None:
+    run_command([A2DISSITE, f"{slug}.conf"], "Apache site rollback")
+
+
+def site_status(slug: str, domain: str, public_path: Path, content: str, site_file: Path) -> str:
+    if not os.path.lexists(site_file):
+        if os.path.lexists(SITES_ENABLED / f"{slug}.conf"):
+            raise HelperError("Apache enabled-site link has no matching configuration file.")
+        return "PENDING"
+    require_root_owned_regular_file(site_file)
+    if read_site_file(site_file) != content:
+        raise HelperError("An existing Apache site file differs from Laravel Manager's configuration.")
+    if not enabled_site(slug, site_file):
+        return "PENDING"
+
+    tls_site_file = ssl_site_file(slug)
+    tls_enabled_file = SITES_ENABLED / tls_site_file.name
+    if os.path.lexists(tls_site_file):
+        require_root_owned_regular_file(tls_site_file)
+        expected_tls_content = render_ssl_vhost(slug, domain, str(public_path))
+        if read_site_file(tls_site_file) != expected_tls_content:
+            raise HelperError("An existing HTTPS site file differs from Laravel Manager's configuration.")
+
+    if os.path.lexists(tls_enabled_file):
+        if not os.path.lexists(tls_site_file) or not ssl_site_enabled(slug, tls_site_file):
+            raise HelperError("Apache HTTPS site link has no matching configuration file.")
+        if not ssl_module_enabled():
+            raise HelperError("Apache mod_ssl is not enabled.")
+        if certificate_expiry(domain) is None:
+            raise HelperError("Let's Encrypt certificate is unavailable.")
+
+    if not rewrite_enabled():
+        raise HelperError("Apache mod_rewrite is not enabled.")
+
+    run_command([APACHECTL, "configtest"], "Apache configuration validation")
+    run_command([SYSTEMCTL, "is-active", "--quiet", "apache2"], "Apache service status check")
+    return "ACTIVE"
+
+
+def enable_site(slug: str, content: str, site_file: Path, created_file: bool) -> None:
+    require_site_directories()
+    was_enabled = enabled_site(slug, site_file)
+    created_link = False
+
+    try:
+        run_command([A2ENMOD, "rewrite"], "Apache rewrite module enable")
+        if not rewrite_enabled():
+            raise HelperError("Apache mod_rewrite could not be enabled.")
+        if not was_enabled:
+            run_command([A2ENSITE, f"{slug}.conf"], "Apache site enable")
+            created_link = True
+
+        if not enabled_site(slug, site_file):
+            raise HelperError("Apache did not enable the requested site.")
+
+        run_command([APACHECTL, "configtest"], "Apache configuration validation")
+        run_command([APACHECTL, "graceful"], "Apache graceful reload")
+        run_command([SYSTEMCTL, "is-active", "--quiet", "apache2"], "Apache service status check")
+    except HelperError:
+        if created_link:
+            try:
+                remove_enabled_site(slug)
+            except HelperError:
+                pass
+        if created_file:
+            try:
+                if read_site_file(site_file) == content:
+                    site_file.unlink()
+            except (OSError, HelperError):
+                pass
+        raise
+
+
+def main(arguments: list[str]) -> int:
+    if len(arguments) == 4 and arguments[0] in {"render", "render-https-redirect", "render-ssl"}:
+        try:
+            if arguments[0] == "render":
+                content = render_vhost(arguments[1], arguments[2], arguments[3])
+            elif arguments[0] == "render-https-redirect":
+                content = render_vhost(arguments[1], arguments[2], arguments[3], redirect_https=True)
+            else:
+                content = render_ssl_vhost(arguments[1], arguments[2], arguments[3])
+
+            print(content, end="")
+            return 0
+        except HelperError as error:
+            print(f"ERROR: {error}", file=sys.stderr)
+            return 2
+
+    if len(arguments) == 1 and arguments[0] == "render-renewal-hook":
+        print(CERTBOT_DEPLOY_HOOK_CONTENT, end="")
+        return 0
+
+    valid_request = (
+        len(arguments) == 2 and arguments[0] in {"enable", "status", "ssl-status"}
+    ) or (len(arguments) == 3 and arguments[0] == "ssl-enable")
+
+    if not valid_request:
+        print(
+            "Usage: laravel-manager-apache enable|status|ssl-enable|ssl-status <slug> "
+            "[administrator-email]",
+            file=sys.stderr,
+        )
+        return 2
+
+    try:
+        require_root()
+        require_site_directories()
+        slug = arguments[1]
+        email = arguments[2] if arguments[0] == "ssl-enable" else None
+        domain, public_path = project_details(slug)
+        site_file = SITES_AVAILABLE / f"{slug}.conf"
+
+        if arguments[0] == "status":
+            redirect_https = os.path.lexists(SITES_ENABLED / f"{slug}-le-ssl.conf")
+            content = render_vhost(slug, domain, str(public_path), redirect_https=redirect_https)
+            print(site_status(slug, domain, public_path, content, site_file))
+            return 0
+
+        if arguments[0] == "ssl-status":
+            print(ssl_status(slug, domain, public_path))
+            return 0
+
+        if arguments[0] == "ssl-enable":
+            if email is None:
+                raise HelperError("Administrator email address is required.")
+            print(enable_ssl(slug, domain, public_path, email))
+            return 0
+
+        redirect_https = os.path.lexists(SITES_ENABLED / f"{slug}-le-ssl.conf")
+        content = render_vhost(slug, domain, str(public_path), redirect_https=redirect_https)
+        site_file, created_file = expected_site_config(f"{slug}.conf", content)
+        enable_site(slug, content, site_file, created_file)
+        print("ACTIVE")
+        return 0
+    except HelperError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 1
+    except OSError:
+        print("ERROR: Apache site operation failed.", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

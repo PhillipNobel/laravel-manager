@@ -1,0 +1,4 @@
+{
+  "base_domain": "apps.example.com",
+  "applications_directory": "/var/www/apps"
+}

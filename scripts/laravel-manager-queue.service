@@ -1,0 +1,20 @@
+[Unit]
+Description=Laravel Manager database queue worker
+After=network.target mysql.service
+Requires=mysql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/laravel-manager
+Environment=APP_ENV=production
+Environment=HOME=/var/www
+ExecStart=/usr/bin/php /opt/laravel-manager/artisan queue:work database --sleep=3 --tries=1 --timeout=3600 --max-time=3600
+Restart=always
+RestartSec=5
+TimeoutStopSec=3700
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target
