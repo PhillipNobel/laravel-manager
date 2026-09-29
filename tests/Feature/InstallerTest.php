@@ -78,3 +78,11 @@ it('runs the persistent database queue worker as www-data', function () {
         'TimeoutStopSec=3700',
     )->not->toContain('User=root');
 });
+
+it('limits database helper sudo access to one anchored provision argument pattern', function () {
+    $sudoers = trim(file_get_contents(base_path('scripts/laravel-manager-database.sudoers')));
+
+    expect($sudoers)->toBe(
+        'www-data ALL=(root) NOPASSWD: /usr/local/sbin/laravel-manager-database ^provision [a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
+    );
+});
