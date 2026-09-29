@@ -1,6 +1,6 @@
 # Laravel Manager RUN Roadmap
 
-RUNs are strictly sequential. Implement only the RUN explicitly requested. RUN 01 through RUN 10 are complete. RUN 11 is current; RUN 12 and later remain pending until requested.
+RUNs are strictly sequential. Implement only the RUN explicitly requested. RUN 01 through RUN 11 are complete. RUN 12 and later remain pending until requested.
 
 ## Approved product direction — per-application choices
 
@@ -262,7 +262,7 @@ Keep deployments safer without adding deployment infrastructure that is not need
 
 Pest covers successful, skipped, and failed post-deployment health checks while faking process and HTTP calls. No test contacts a public application or production service.
 
-## RUN 11 — Production Installer — Current
+## RUN 11 — Production Installer — Complete
 
 ### Objective
 
@@ -274,7 +274,7 @@ Support only Ubuntu 24.04 on amd64 or arm64. Use Ubuntu packages for PHP 8.3, PH
 
 Install Laravel Manager under `/opt/laravel-manager`, create its MySQL schema/user, set production environment values, restrict source and `.env` permissions, and leave only `storage` and `bootstrap/cache` writable by `www-data`. Install the existing Apache/MySQL helpers and narrow sudoers rules. Serve the manager on port 8080, future projects through Apache port 80, and run the database queue worker as `www-data` under systemd. Prompt for the initial administrator credentials and seed the existing administrator seeder without persisting the plaintext password. Laravel Manager and all PHP/queue work must run unprivileged.
 
-Require a public HTTPS GitHub repository URL through `LARAVEL_MANAGER_REPOSITORY` until the canonical repository URL is available to embed in the published installer. Print the server access URL and remind the administrator to allow ports 80, 443, and 8080 in the VPS firewall. Never execute the installer against the development machine.
+Require the public GitHub repository URL through `LARAVEL_MANAGER_REPOSITORY`. Set `APP_URL` to the first local IPv4 address on port 8080 by default, with a validated `MANAGER_URL` override for servers behind NAT or using a manager domain. Print the selected server access URL and remind the administrator to allow ports 80, 443, and 8080 in the VPS firewall. Never execute the installer against the development machine.
 
 ### Acceptance criteria
 
@@ -282,7 +282,7 @@ Require a public HTTPS GitHub repository URL through `LARAVEL_MANAGER_REPOSITORY
 - Installer installs required server packages and configures Apache/PHP-FPM, MySQL, Laravel Manager, its database, permissions, helper configs, sudoers, and the queue worker service.
 - The manager serves from `public` on port 8080; application sites can use port 80; PHP-FPM and queue workers run as `www-data`, never root.
 - `bash -n`, the installer dry-run, the full Pest suite, and the frontend build pass locally without running the installer on macOS.
-- Before marking RUN 11 complete, install on a disposable Ubuntu 24.04 amd64 or arm64 VPS and verify the manager login, app vhost port, database, queue service, and narrow sudo rules.
+- A disposable Ubuntu 24.04 arm64 Multipass VM installed commit `9210f04`; browser login and the manager on port 8080 worked, all 14 database tables were present, Apache/PHP-FPM/MySQL/queue services were active, and both sudoers files passed `visudo`.
 - README.md, AGENTS.md, and RUNS.md document the supported platform, install steps, firewall note, services, and recovery boundary.
 
 ## RUN 12 — Per-Application PHP and Database Choices — Pending

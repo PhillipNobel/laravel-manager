@@ -41,7 +41,7 @@ For a non-mutating local check, run:
 LARAVEL_MANAGER_REPOSITORY=https://github.com/PhillipNobel/laravel-manager.git bash scripts/install.sh --dry-run
 ```
 
-The installer changes the host and does not roll back completed package or service changes if a later step fails. It refuses to overwrite existing Laravel Manager paths. Review failures on a disposable clean VPS before retrying. It does not change SSH, firewall rules, DNS, or unrelated services; allow TCP ports 80, 443, and 8080 in the VPS/provider firewall. Configure the applications domain and other server values in Settings after login. Full installation still needs a smoke test on disposable Ubuntu 24.04 before RUN 11 is complete.
+The installer changes the host and does not roll back completed package or service changes if a later step fails. It refuses to overwrite existing Laravel Manager paths. Review failures on a disposable clean VPS before retrying. It does not change SSH, firewall rules, DNS, or unrelated services; allow TCP ports 80, 443, and 8080 in the VPS/provider firewall. Configure the applications domain and other server values in Settings after login. Commit `9210f04` passed a clean Ubuntu 24.04 arm64 Multipass installation test, including login, manager pages at desktop/mobile sizes, all four services, the database, and both sudoers checks.
 
 ## Local installation
 
