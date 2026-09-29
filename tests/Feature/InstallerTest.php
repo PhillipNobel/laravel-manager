@@ -22,6 +22,47 @@ it('prints the Ubuntu installation plan without changing the host', function () 
         );
 });
 
+it('uses the configured manager URL in the installation plan and Laravel environment', function () {
+    $managerUrl = 'https://manager.example.test:8080';
+    $process = new SymfonyProcess(
+        ['/bin/bash', base_path('scripts/install.sh'), '--dry-run'],
+        base_path(),
+        [
+            'LARAVEL_MANAGER_REPOSITORY' => 'https://github.com/acme/laravel-manager.git',
+            'MANAGER_URL' => $managerUrl,
+        ],
+    );
+    $process->run();
+
+    $installer = file_get_contents(base_path('scripts/install.sh'));
+
+    expect($process->isSuccessful())->toBeTrue()
+        ->and($process->getOutput())->toContain("Manager URL: {$managerUrl}")
+        ->and($installer)->toContain('APP_URL=${MANAGER_URL}')
+        ->not->toContain('APP_URL=http://localhost:8080');
+});
+
+it('rejects malformed manager URLs before showing the installation plan', function (string $managerUrl) {
+    $process = new SymfonyProcess(
+        ['/bin/bash', base_path('scripts/install.sh'), '--dry-run'],
+        base_path(),
+        [
+            'LARAVEL_MANAGER_REPOSITORY' => 'https://github.com/acme/laravel-manager.git',
+            'MANAGER_URL' => $managerUrl,
+        ],
+    );
+    $process->run();
+
+    expect($process->isSuccessful())->toBeFalse()
+        ->and($process->getErrorOutput())->toContain('MANAGER_URL must be an HTTP or HTTPS URL with a hostname or IPv4 address and optional port.');
+})->with([
+    'unexpected path' => 'http://manager.example.test/path',
+    'missing host' => 'http://:8080',
+    'unsupported scheme' => 'ftp://manager.example.test',
+    'port out of range' => 'http://manager.example.test:65536',
+    'shell metacharacter' => 'http://manager.example.test/$(id)',
+]);
+
 it('rejects a non-GitHub repository URL before showing the installation plan', function () {
     $process = new SymfonyProcess(
         ['/bin/bash', base_path('scripts/install.sh'), '--dry-run'],

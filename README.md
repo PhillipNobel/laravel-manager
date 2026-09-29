@@ -26,20 +26,22 @@ Laravel Manager itself runs on PHP 8.3 and uses MySQL in production. Current app
 
 The production installer targets a clean Ubuntu 24.04 LTS VPS on amd64 or arm64. It installs Apache, PHP 8.3-FPM, MySQL, Git, Node.js 24, Composer, Certbot, Laravel Manager, its database, the existing restricted helpers, and a systemd queue worker. It serves Laravel Manager on port 8080 and prompts for the first administrator email and password.
 
-The project does not have a canonical public GitHub repository URL yet. Once one is selected, replace both placeholders below with that repository. The first URL serves the installer script; the second tells it which repository to clone into `/opt/laravel-manager`:
+The installer script and project are published at `PhillipNobel/laravel-manager`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/OWNER/REPOSITORY/main/scripts/install.sh \
-  | sudo env LARAVEL_MANAGER_REPOSITORY=https://github.com/OWNER/REPOSITORY.git bash -s --
+curl -fsSL https://raw.githubusercontent.com/PhillipNobel/laravel-manager/main/scripts/install.sh \
+  | sudo env LARAVEL_MANAGER_REPOSITORY=https://github.com/PhillipNobel/laravel-manager.git bash -s --
 ```
+
+The installer sets Laravel's `APP_URL` to the first local IPv4 address on port 8080 and prints that address at the end. If the VPS is behind NAT or has a domain for the manager, add a browser-reachable URL such as `MANAGER_URL=http://manager.example.com:8080` to `sudo env` in the installation command. Use an HTTPS URL only when a TLS reverse proxy for Laravel Manager is already configured.
 
 For a non-mutating local check, run:
 
 ```bash
-LARAVEL_MANAGER_REPOSITORY=https://github.com/OWNER/REPOSITORY.git bash scripts/install.sh --dry-run
+LARAVEL_MANAGER_REPOSITORY=https://github.com/PhillipNobel/laravel-manager.git bash scripts/install.sh --dry-run
 ```
 
-The installer changes the host and does not roll back completed package or service changes if a later step fails. It refuses to overwrite existing Laravel Manager paths. Review failures on a disposable clean VPS before retrying. It does not change SSH, firewall rules, DNS, or unrelated services; allow TCP ports 80, 443, and 8080 in the VPS/provider firewall. Configure the manager URL, applications domain, and other server values in Settings after login. Full installation still needs a smoke test on disposable Ubuntu 24.04 before RUN 11 is complete.
+The installer changes the host and does not roll back completed package or service changes if a later step fails. It refuses to overwrite existing Laravel Manager paths. Review failures on a disposable clean VPS before retrying. It does not change SSH, firewall rules, DNS, or unrelated services; allow TCP ports 80, 443, and 8080 in the VPS/provider firewall. Configure the applications domain and other server values in Settings after login. Full installation still needs a smoke test on disposable Ubuntu 24.04 before RUN 11 is complete.
 
 ## Local installation
 

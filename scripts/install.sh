@@ -13,6 +13,7 @@ readonly INSTALL_MARKER='/var/lib/laravel-manager/installed'
 INSTALL_TMP=''
 ADMIN_EMAIL=''
 ADMIN_PASSWORD=''
+MANAGER_URL="${MANAGER_URL:-}"
 
 fail() {
     printf 'ERROR: %s\n' "$1" >&2
@@ -48,6 +49,7 @@ Required environment:
 Optional environment:
   LOCAL_ADMIN_EMAIL           Seed the first administrator without a prompt
   LOCAL_ADMIN_PASSWORD       Password for the first administrator (16-72 bytes)
+  MANAGER_URL                Browser-reachable manager URL (default: first local IPv4 on port 8080)
 
 With no option, install Laravel Manager on a clean Ubuntu 24.04 VPS as root.
 USAGE
@@ -60,6 +62,13 @@ valid_repository_url() {
 }
 
 show_plan() {
+    local planned_manager_url="${MANAGER_URL:-http://SERVER_IP:8080}"
+
+    if [[ -n "$MANAGER_URL" ]]; then
+        validate_manager_url "$MANAGER_URL" \
+            || fail 'MANAGER_URL must be an HTTP or HTTPS URL with a hostname or IPv4 address and optional port.'
+    fi
+
     printf '%s\n' \
         'Dry run; no system changes will be made.' \
         'Target: Ubuntu 24.04 LTS (amd64 or arm64)' \
@@ -70,9 +79,30 @@ show_plan() {
         'Packages: Apache, MySQL, Git, Composer, Certbot, PHP extensions, Node.js/npm' \
         'Manager database: laravel_manager (local MySQL socket)' \
         'Queue: systemd service running as www-data' \
-        'Manager URL: http://SERVER_IP:8080' \
+        "Manager URL: $planned_manager_url" \
         'Application directory: /var/www/apps' \
         'Firewall: allow TCP ports 80, 443, and 8080 at the VPS provider and host firewall.'
+}
+
+validate_manager_url() {
+    local manager_url_pattern='^https?://([A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?)(:([0-9]{1,5}))?$'
+
+    [[ "$1" =~ $manager_url_pattern ]] || return 1
+
+    local port="${BASH_REMATCH[4]:-}"
+    [[ -z "$port" ]] || (( 10#$port >= 1 && 10#$port <= 65535 ))
+}
+
+resolve_manager_url() {
+    if [[ -z "$MANAGER_URL" ]]; then
+        local server_ip
+        server_ip=$(/usr/bin/hostname -I | /usr/bin/awk '{print $1}')
+        [[ -n "$server_ip" ]] || fail 'Cannot detect a server IPv4 address. Set MANAGER_URL to the browser-reachable manager URL.'
+        MANAGER_URL="http://${server_ip}:8080"
+    fi
+
+    validate_manager_url "$MANAGER_URL" \
+        || fail 'MANAGER_URL must be an HTTP or HTTPS URL with a hostname or IPv4 address and optional port.'
 }
 
 require_repository() {
@@ -265,7 +295,7 @@ SQL
     /usr/bin/sed -i \
         -e 's/^APP_ENV=.*/APP_ENV=production/' \
         -e 's/^APP_DEBUG=.*/APP_DEBUG=false/' \
-        -e 's#^APP_URL=.*#APP_URL=http://localhost:8080#' \
+        -e "s#^APP_URL=.*#APP_URL=${MANAGER_URL}#" \
         -e 's/^DB_CONNECTION=.*/DB_CONNECTION=mysql/' \
         -e 's/^MANAGER_DEFAULT_PHP_VERSION=.*/MANAGER_DEFAULT_PHP_VERSION=8.3/' \
         "$APP_DIR/.env"
@@ -420,6 +450,7 @@ main() {
 
     require_repository
     require_root_and_platform
+    resolve_manager_url
     require_clean_target
     read_admin_credentials
 
@@ -433,7 +464,7 @@ main() {
     verify_installation
 
     printf '\nLaravel Manager installed successfully.\n'
-    printf 'Open: http://SERVER_IP:8080\n'
+    printf 'Open: %s\n' "$MANAGER_URL"
     printf 'Administrator: %s\n' "$ADMIN_EMAIL"
     printf 'Allow TCP ports 80, 443, and 8080 in the VPS firewall.\n'
 }
