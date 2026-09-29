@@ -6,6 +6,8 @@ Laravel Manager is a self-hosted web application for managing Laravel applicatio
 
 RUN 01 through RUN 10 are complete. RUN 11 — Production Installer is in progress. Settings hold this server's identity, Laravel app defaults, and GitHub connection. The protected Server page shows local environment details and read-only software checks. Create App clones a selected GitHub repository and prepares its Laravel environment. Protected Project actions configure its Apache virtual host, create and verify a dedicated MySQL database, deploy manually or after a matching GitHub push, and enable HTTPS with Let's Encrypt.
 
+Laravel Manager itself runs on PHP 8.3 and uses MySQL in production. Current application database provisioning supports MySQL. A pending roadmap update will let each app choose PHP 8.2, 8.3, or 8.4 and MySQL or PostgreSQL in Create App; the installer will not ask for those per-app choices.
+
 ## Stack
 
 - Laravel 13.33
@@ -122,7 +124,7 @@ Settings lists up to 100 repositories sorted by recent activity, with visibility
 
 ## Creating an application
 
-Connect GitHub in **Settings**, then open **Apps → Create App**. Enter an application name and subdomain, select a repository, and choose a branch and PHP version. The branch defaults to the selected repository's default branch. The domain is generated from the configured base applications domain.
+Connect GitHub in **Settings**, then open **Apps → Create App**. Enter an application name and subdomain, select a repository, and choose a branch and PHP version. The branch defaults to the selected repository's default branch. The domain is generated from the configured base applications domain. Per-app MySQL/PostgreSQL selection and the expanded PHP version choices are planned for RUN 12; they are not available in the current implementation.
 
 Laravel Manager rechecks repository access, validates the branch, then clones the selected branch into:
 
@@ -172,6 +174,8 @@ Certbot packages provide an automatic renewal schedule through cron or a systemd
 After deploying an update, refresh the root-owned helper and its narrow sudo rule using the Apache installation commands above, then validate the rule with `sudo visudo -cf /etc/sudoers.d/laravel-manager-apache`. The helper does not run Certbot from a web request: Laravel queues the operation, and the queue worker calls only the allowlisted helper. Tests fake that process call and render Apache templates without contacting Let's Encrypt or modifying a server.
 
 ## Application databases
+
+The current provisioning flow supports MySQL only. Per-app MySQL/PostgreSQL selection is planned for RUN 12. The Laravel Manager production database remains MySQL.
 
 The production installer installs the database helper and its narrow sudo rule. On an existing server maintained manually, install them after MySQL is available:
 
@@ -227,4 +231,4 @@ RUN 08 does not create repository webhooks through the GitHub API. RUN 10 adds a
 
 ## Roadmap
 
-See [RUNS.md](RUNS.md). RUN 10 is complete and RUN 11 — Production Installer is current. RUNs are strictly sequential; do not implement a later RUN until requested.
+See [RUNS.md](RUNS.md). RUN 10 is complete and RUN 11 — Production Installer is current. RUN 12 — Per-Application PHP and Database Choices is pending. RUNs are strictly sequential; do not implement a later RUN until requested.

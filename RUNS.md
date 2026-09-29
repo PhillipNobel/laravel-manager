@@ -2,6 +2,13 @@
 
 RUNs are strictly sequential. Implement only the RUN explicitly requested. RUN 01 through RUN 10 are complete. RUN 11 is current; RUN 12 and later remain pending until requested.
 
+## Approved product direction — per-application choices
+
+- The installer does not ask which PHP version or database engine to use for an application. Laravel Manager itself keeps its fixed PHP 8.3 runtime and MySQL production database; local development remains SQLite.
+- Create App will let the administrator choose a PHP runtime (initial options: 8.2, 8.3, or 8.4) and a database engine (MySQL or PostgreSQL) for each application. The server's default PHP setting may preselect a value, but every Project stores its own choice.
+- The selected database engine is used by that application's database provisioning flow. Supported runtimes and database services must already be available on the server; never install OS packages from an HTTP request.
+- This extends the completed Create App and MySQL-only database implementation. RUN 12 owns that extension; do not implement it until RUN 12 is requested. Verify current PHP support and the simplest safe Ubuntu 24.04 package strategy when that RUN starts.
+
 ## RUN 01 — Application Foundation — Complete
 
 ### Objective
@@ -278,7 +285,30 @@ Require a public HTTPS GitHub repository URL through `LARAVEL_MANAGER_REPOSITORY
 - Before marking RUN 11 complete, install on a disposable Ubuntu 24.04 amd64 or arm64 VPS and verify the manager login, app vhost port, database, queue service, and narrow sudo rules.
 - README.md, AGENTS.md, and RUNS.md document the supported platform, install steps, firewall note, services, and recovery boundary.
 
-## RUN 12 — First-Run Setup — Pending
+## RUN 12 — Per-Application PHP and Database Choices — Pending
+
+### Objective
+
+Let the administrator choose each Laravel application's PHP runtime and database engine when creating the app.
+
+### Scope
+
+Add PHP 8.2, 8.3, and 8.4 choices and MySQL/PostgreSQL selection to Create App. Store each choice on its Project and show it on the project detail page. The Settings PHP version remains only a form default. Route later database provisioning through the selected engine's controlled helper, using a separate database and least-privilege account for each app. Keep Laravel Manager itself on PHP 8.3 and its production database on MySQL.
+
+Confirm the chosen PHP-FPM runtimes and both database services are available on Ubuntu 24.04 before offering them. Resolve the package source and installer integration for supported PHP versions using current documentation. Do not install packages dynamically from a web request, accept arbitrary runtime names, or add remote database providers.
+
+### Acceptance criteria
+
+- Create App offers only the supported PHP versions 8.2, 8.3, and 8.4 and the MySQL/PostgreSQL database choices; values are validated against an explicit allowlist.
+- Each Project persists its own PHP version and database engine. The Settings default may preselect PHP but does not override the saved project value.
+- Project detail shows both selections, and database provisioning uses the selected engine without changing the Laravel Manager's own database configuration.
+- Each application receives a separate database and least-privilege account. Credentials are written safely to the app `.env`, never stored on Project, shown in the UI, or written to logs.
+- Server prerequisites are detected before an unavailable choice can be selected. No OS package installation is triggered by an HTTP request.
+- Pest covers form validation, persistence, engine-specific provisioning dispatch, unavailable prerequisites, failures, and secret handling. Tests fake all helper/process calls and connect to no real database.
+- Chrome DevTools verifies Create App and Project detail for both engine choices, validation, responsive behavior, and browser console.
+- README.md, AGENTS.md, and RUNS.md document the supported choices and security boundaries.
+
+## RUN 13 — First-Run Setup — Pending
 
 ### Objective
 
@@ -288,7 +318,7 @@ Create polished onboarding for a newly installed server.
 
 Create administrator; configure applications domain; verify server; connect GitHub; verify wildcard DNS; finish. After setup, show Apps with a useful empty state and Create App action. Use April UI, Impeccable, and Chrome DevTools MCP extensively.
 
-## RUN 13 — Hardening & Production Readiness — Pending
+## RUN 14 — Hardening & Production Readiness — Pending
 
 ### Objective
 
@@ -298,7 +328,7 @@ Review the complete system for safe real-world VPS use.
 
 Authentication, authorization, CSRF, webhook verification, secret storage, filesystem permissions, sudoers, shell injection, argument escaping, database credentials, deployment locking, Apache validation, error handling, auditability, logs, and sensitive output filtering. Review every OS command call. Never expose arbitrary command execution through HTTP.
 
-## RUN 14 — Manager Updates — Pending
+## RUN 15 — Manager Updates — Pending
 
 ### Objective
 
@@ -306,7 +336,7 @@ Update Laravel Manager itself safely, through the UI or a simple `laravel-manage
 
 Support application code and Composer dependencies, frontend assets, migrations, cache rebuild, queue restart, and version display. Use the simplest safe update mechanism; do not build a complex package distribution system.
 
-## RUN 15 — Final Polish — Pending
+## RUN 16 — Final Polish — Pending
 
 ### Objective
 

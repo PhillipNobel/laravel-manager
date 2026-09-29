@@ -368,7 +368,7 @@ configure_apache() {
     /usr/sbin/a2enconf laravel-manager-port
     /usr/sbin/a2ensite laravel-manager
     /usr/bin/install -d -o www-data -g www-data -m 0750 "$APPLICATIONS_DIR"
-    /usr/bin/apache2ctl configtest
+    /usr/sbin/apache2ctl configtest
     /usr/bin/systemctl reload apache2.service
 }
 

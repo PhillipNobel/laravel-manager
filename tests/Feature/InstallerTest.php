@@ -86,3 +86,10 @@ it('limits database helper sudo access to one anchored provision argument patter
         'www-data ALL=(root) NOPASSWD: /usr/local/sbin/laravel-manager-database ^provision [a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
     );
 });
+
+it('uses Ubuntu apache2ctl path for configuration validation', function () {
+    $installer = file_get_contents(base_path('scripts/install.sh'));
+
+    expect($installer)->toContain('/usr/sbin/apache2ctl configtest')
+        ->not->toContain('/usr/bin/apache2ctl');
+});
