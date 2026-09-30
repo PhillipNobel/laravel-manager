@@ -1,6 +1,6 @@
 # Laravel Manager RUN Roadmap
 
-RUNs are strictly sequential. Implement only the RUN explicitly requested. RUN 01 through RUN 16 are complete. Scope any additional work explicitly before starting it.
+RUNs are strictly sequential. Implement only the RUN explicitly requested. RUN 01 through RUN 18 are complete. RUN 19+ are pending.
 
 ## Required verification for every RUN
 
@@ -440,3 +440,119 @@ Review simplicity, architecture, naming, unused abstractions, UI consistency, mo
 - Chrome DevTools tested login/logout, each setup step, the Apps empty state, populated app list, Create App's GitHub-not-connected recovery state, Settings save, Server checks, project statuses/deployment output, mobile navigation, and desktop/mobile overflow. The VM server checks reported 7/10 available, matching installed services. Browser console had no messages.
 - Desktop at 1440px and narrow layout at 500px had no horizontal overflow. The empty-state refinement was covered by a Pest regression test; the populated list keeps its top-right Create App action.
 - GitHub OAuth and real deployment were not run against an external repository. Their API/process paths remain covered by local fakes; no external account or live app was used for this visual pass.
+
+## RUN 17 — Create GitHub Repository from Create App — Complete
+
+### Objective
+
+Let the administrator create a private GitHub repository from Create App, with a usable Laravel starter committed to its `main` branch. Keep the existing-repository workflow available.
+
+### Scope
+
+- Add an explicit choice between an existing connected repository and a new private repository.
+- Derive the new repository name from the validated subdomain and show the connected GitHub owner/name before submission.
+- Generate a trusted `laravel/laravel` starter using Composer. Select Laravel 12 for PHP 8.2 and Laravel 13 for PHP 8.3/8.4.
+- Run `composer create-project` with `--no-install`, `--no-scripts`, and `--no-plugins`; do not install dependencies or execute starter scripts.
+- Create the authenticated user's private repository through GitHub REST `POST /user/repos` with `auto_init=false`, make a fixed initial Git commit, and push `main` using the OAuth token only through transient Git environment configuration.
+- Continue through the existing Project provisioning flow so the Manager clones the new repository into the applications root and writes the local production `.env`.
+- Keep OAuth credentials out of arguments, clone URLs, `.git/config`, Project fields, browser output, and process logs. Bound all Composer and Git calls and clean the Manager-owned staging directory in all outcomes.
+- Explain when GitHub created the private repository but the initial push or later clone failed; do not automatically delete a remote repository.
+
+### Explicitly excluded
+
+Do not create public repositories, GitHub webhooks, repository deployment keys, databases, Apache sites, SSL certificates, or automatic deployments. Do not run Composer dependency installation, starter scripts, or repository-provided code during Create App. Do not add arbitrary repository names, branches, commands, or URLs to process arguments.
+
+### Acceptance criteria
+
+- Create App lets the administrator choose an existing repository or create a new private repository. The new option works even when the connected account has no repositories.
+- New repository name is derived from the validated application subdomain, the repository is private, `main` is pushed with a Laravel starter compatible with the selected PHP version, and the Project records its canonical GitHub URL/name.
+- The existing repository selection, verification, branch choice, and provisioning behavior continue to work.
+- Laravel starter files are generated in a unique Manager-owned staging directory. Composer does not install dependencies, load plugins, or run scripts; the staging directory is removed after success or failure.
+- GitHub REST and process failures produce safe, actionable feedback. A remote repository created before a push failure remains linked to the failed Project; credentials and raw process output are not logged.
+- Pest covers the Livewire workflow, private repository request/response validation, Composer/Git commands, successful push and clone, existing-repository regression, and failures. Tests fake every GitHub request and Process call.
+- Chrome DevTools tests the existing/new choices, empty repository list, validation, domain preview, success and failure states, navigation, desktop and mobile layout, and browser console.
+- Context7 documents GitHub REST, Composer, and Laravel version compatibility; April UI and Impeccable review the Create App form; Caveman reviews the architecture.
+- The full local Pest suite and frontend build pass. The new-repository path is tested on the existing Ubuntu 24.04 Multipass VM with an isolated test copy; the existing Manager install and database are preserved. Record commands and outcomes.
+- README.md, AGENTS.md, and RUNS.md document the new workflow and security boundary.
+
+### Verification results
+
+- Local: the existing-repository path remains available. New-repository tests fake every GitHub request and Composer/Git/clone process, including successful provisioning, an invalid GitHub response, GitHub creation failure, push failure, Laravel version selection, credential redaction, and staging cleanup. The invalid-subdomain test confirms no repository name is previewed until the subdomain is valid.
+- VM: `laravel-manager-run11`, Ubuntu 24.04.5 LTS, arm64, Multipass address `192.168.252.6`. Inspected the VM before testing; its installed Manager at `/opt/laravel-manager`, Manager database, Apache, MySQL, PHP-FPM, and queue were left intact. Transferred the current source into `/tmp/laravel-manager-run17-test`, used a dedicated temporary MySQL schema/user because this image has no `pdo_sqlite`, and served the isolated copy with `php artisan serve --host=0.0.0.0 --port=8081`. Removed no installed application data.
+- VM command smoke: as `www-data`, `composer create-project laravel/laravel:^13.0 <unique-temp-path> --no-install --no-scripts --no-plugins --no-interaction --prefer-dist` generated a Laravel starter without `vendor`, `.env`, or `.git`. Then `git init --initial-branch=main`, `git add --all`, a fixed initial commit, and `git push --set-upstream origin main` succeeded against a temporary local bare repository. No live GitHub repository was created and no real OAuth token was used.
+- A first manual Composer probe was launched with current directory `/home/ubuntu`, which `www-data` cannot enter; Symfony Process correctly failed at `chdir`. Repeating the smoke from accessible `/tmp` succeeded. The production action explicitly sets `Process::path()` to its Manager-owned staging directory, so no code change was needed for this test-only working-directory mistake. Composer's warning about its default cache under `/var/www` was nonfatal.
+- Chrome DevTools against the VM copy checked both source choices: an empty repository list and its recovery state, then an existing repository with its default branch, plus switching to new private repository, connected-owner/name preview, valid and invalid subdomain feedback, validation errors, and simulated successful create/provision flows for both source types. The browser-only success scenarios used a temporary `AppServiceProvider` in the isolated copy with `Http::fake` and `Process::fake`; no real GitHub repository was created. At 1440px desktop and 390px mobile, `document.documentElement.scrollWidth` equaled `innerWidth`; no horizontal overflow. The mobile menu opened and the Create App route remained usable. Browser console had no messages. Browser network traffic was limited to the isolated VM application and its Livewire updates.
+- UI review found that an invalid subdomain could appear as a repository-name preview. The preview now waits for a valid subdomain, with a Pest regression test. April UI's existing input, select, button, helper-text, and alert styles remain in use; no new UI dependency or component layer was added.
+- Context7 was consulted for GitHub REST repository creation and OAuth scope, Composer `create-project` options, and Laravel Process configuration/testing. `composer create-project --help` confirmed the local Composer options. The production repo uses the existing OAuth `repo` scope and private repository creation.
+- Final local verification: Pest passed 180 tests and 865 assertions; `vendor/bin/pint --test`, `composer validate --no-check-publish`, `npm run build`, and `git diff --check` all passed.
+
+### VM commands and isolation
+
+```text
+multipass info laravel-manager-run11
+multipass exec laravel-manager-run11 -- lsb_release -a
+multipass transfer /private/tmp/laravel-manager-run17-source.tar.gz laravel-manager-run11:/tmp/laravel-manager-run17-source.tar.gz
+# Extracted to /tmp/laravel-manager-run17-test; installed Manager checkout/database were not used.
+cd /tmp/laravel-manager-run17-test && php artisan serve --host=0.0.0.0 --port=8081
+# Chrome DevTools opened http://192.168.252.6:8081/apps/create at 1440px and 390px.
+```
+
+The isolated UI copy used a test-only MySQL schema `laravel_manager_run17_ui`, a separate local test user, and a fake GitHub connection. Its database and temporary source copy are test artifacts; the pre-existing `/opt/laravel-manager` application and database were not changed. A temporary provider in the copy faked GitHub REST and Composer/Git processes for the browser success path. The temporary HTTP server was stopped after Chrome checks.
+
+## RUN 18 — VPS setup guide and theme selector — Complete
+
+### Objective
+
+Document practical GitHub, DNS, firewall, and TLS setup for new VPS installations, and add a user-selectable dark theme to the authenticated Manager interface.
+
+### Scope
+
+- Add a step-by-step README guide for Cloudflare DNS, OCI provider rules and Ubuntu host firewalls, initial public-IP access, GitHub OAuth setup, TLS reverse proxy for the Manager panel, and Let's Encrypt HTTPS for managed applications.
+- Include the verified diagnostics and recovery sequence for the OCI case where Apache returned HTTP 200 locally but the host iptables INPUT reject blocked public port 8080.
+- Add System, Light, and Dark theme choices to the authenticated header, follow system preference by default, and persist an explicit choice in browser local storage.
+- Trust HTTPS-forwarding headers only from the loopback Apache reverse proxy used by the documented Manager TLS setup.
+- Keep April UI components, existing design tokens, and dependencies; do not change installer, firewall, OAuth, or certificate behavior.
+
+### Acceptance criteria
+
+- README describes provider and host firewall layers independently, documents the host port 8080 diagnostic, and links to current official Cloudflare, OCI, GitHub, Apache, and Let's Encrypt documentation.
+- README explains the GitHub OAuth callback, required environment values, encrypted credential behavior, the `repo` scope, and the verified Manager/app HTTPS setup.
+- The authenticated header offers accessible System, Light, and Dark menu items using April UI; the initial theme avoids a light flash, follows system settings by default, and saves explicit choices locally.
+- Laravel recognizes forwarded HTTPS from the documented loopback reverse proxy and ignores the same forwarded header from a remote client.
+- Dark colors maintain readable foreground, input, border, sidebar, and menu contrast without adding dependencies.
+- Pest covers the authenticated theme selector markup and preference bootstrap. Browser verification tests selecting all three modes and persistence after reload.
+- Full Pest suite, frontend production build, formatting, and Composer validation pass.
+- Impeccable reviews desktop and narrow layouts; Chrome DevTools checks interactions, theme persistence, overflow, and console output against the isolated Ubuntu VM copy.
+- The existing Manager install and database on the VM remain untouched; this RUN records VM identity, commands, and outcomes.
+- README.md, AGENTS.md, and RUNS.md document the user setup guide, theme preference, and loopback proxy boundary.
+
+### Verification results
+
+- README now includes DNS-only Cloudflare setup, A/AAAA guidance, separate OCI provider and Ubuntu host firewall rules, the observed INPUT reject and its persistent-rule recovery, public-IP `APP_URL` recovery, GitHub OAuth creation/callback/scope setup, Apache TLS reverse proxy for the Manager, secure cookies, Cloudflare Full (strict), and app certificate renewal checks. It links to official Oracle, Cloudflare, GitHub, Apache, Certbot, and Let's Encrypt documentation.
+- The header's April UI dropdown offers accessible System, Light, and Dark menu radio choices. The inline bootstrap applies the saved/system choice before styles load; CSS defines dark surfaces and text through existing tokens and sets the native browser color scheme. Explicit choices are browser-local. No package or component abstraction was added.
+- Laravel trusts forwarded proxy headers only from `127.0.0.1`; Pest verifies that local Apache's `X-Forwarded-Proto: https` is recognized and the same header from a remote client is ignored.
+- Context7 was consulted for Tailwind CSS 4 manual dark-mode selectors and Laravel 13 trusted-proxy configuration. April UI's dropdown menu/item pattern was used. Impeccable review of the desktop and narrow screenshots found the theme hierarchy, token contrast, spacing, and controls consistent with the restrained admin shell; no extra decoration or new component layer was needed. Caveman review kept the change in the existing layout/CSS and avoided a package, settings table, service, or theme abstraction.
+- Local verification: Pest passed 183 tests and 875 assertions; `vendor/bin/pint --test`, `composer validate --no-check-publish`, `npm run build`, and `git diff --check` passed.
+- VM verification: inspected `laravel-manager-run11` before changes. It is Ubuntu 24.04.5 LTS, arm64, Multipass IP `192.168.252.6`; the installed `/opt/laravel-manager` at `4bf5877`, Apache, MySQL, PHP 8.3-FPM, queue, and Manager database remained intact. The test used source in `/tmp/laravel-manager-run18-theme`, a dedicated schema `laravel_manager_run18_ui`, and port 8082. The temporary browser server was stopped and port 8082 verified closed.
+- Chrome DevTools signed in to the isolated app and selected System, Light, and Dark through the actual header menu. It confirmed System followed emulated OS dark and light changes, explicit Light survived reload, and explicit Dark stayed active on later navigation/reload. Apps and Settings were inspected at 1440×900; Apps, Create App, and Settings were checked at 390×844 in dark mode. At 390px, document and body widths both matched the viewport; browser console had no messages. The Manager login endpoint returned HTTP 200. No live GitHub OAuth, external repository, firewall rule, or Let's Encrypt request was used.
+
+### VM commands and isolation
+
+```text
+multipass info laravel-manager-run11
+multipass exec laravel-manager-run11 -- bash -lc '. /etc/os-release; echo "$PRETTY_NAME"; sudo git -C /opt/laravel-manager rev-parse --short HEAD; sudo systemctl is-active apache2 php8.3-fpm mysql laravel-manager-queue'
+multipass transfer /private/tmp/laravel-manager-run18-theme.tar.gz laravel-manager-run11:/tmp/laravel-manager-run18-theme.tar.gz
+# Extracted to /tmp/laravel-manager-run18-theme; copied the existing vendor tree into this isolated source copy.
+# Created only the dedicated laravel_manager_run18_ui test schema/user and a temporary administrator.
+sudo -u www-data /usr/bin/php8.3 /tmp/laravel-manager-run18-theme/artisan key:generate --force
+sudo -u www-data /usr/bin/php8.3 /tmp/laravel-manager-run18-theme/artisan migrate --seed --force
+sudo -u www-data /usr/bin/php8.3 /tmp/laravel-manager-run18-theme/artisan optimize
+multipass exec laravel-manager-run11 -- sudo -u www-data bash -lc 'cd /tmp/laravel-manager-run18-theme && nohup /usr/bin/php8.3 artisan serve --host=0.0.0.0 --port=8082 >/tmp/laravel-manager-run18-theme.log 2>&1 </dev/null &'
+# Chrome DevTools tested http://192.168.252.6:8082 at 1440x900 and 390x844.
+# Transferred the final bootstrap/app.php to the isolated copy and reran artisan optimize as www-data.
+# Stopped the exact temporary server PID and verified no listener remained on port 8082.
+```
+
+## RUN 19+ — Pending
+
+Do not begin another RUN until explicitly requested.

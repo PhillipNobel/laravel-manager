@@ -5,6 +5,56 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>{{ isset($title) && $title ? $title.' · ' : '' }}Laravel Manager</title>
+    <script>
+        (() => {
+            const storageKey = 'laravel-manager-theme';
+            const themes = ['system', 'light', 'dark'];
+            const root = document.documentElement;
+            const systemTheme = window.matchMedia('(prefers-color-scheme: dark)');
+            let preference = 'system';
+
+            try {
+                const savedPreference = localStorage.getItem(storageKey);
+                if (themes.includes(savedPreference)) preference = savedPreference;
+            } catch {}
+
+            const applyTheme = () => {
+                const useDarkTheme = preference === 'dark' || (preference === 'system' && systemTheme.matches);
+                root.classList.toggle('dark', useDarkTheme);
+                root.dataset.themePreference = preference;
+            };
+
+            const updateThemeOptions = () => {
+                document.querySelectorAll('[data-theme-option]').forEach((option) => {
+                    const selected = option.dataset.themeOption === preference;
+                    option.setAttribute('aria-checked', String(selected));
+                    option.querySelector('[data-theme-check]')?.classList.toggle('hidden', !selected);
+                });
+            };
+
+            window.laravelManagerSetTheme = (theme) => {
+                if (!themes.includes(theme)) return;
+
+                preference = theme;
+                try {
+                    localStorage.setItem(storageKey, theme);
+                } catch {}
+
+                applyTheme();
+                updateThemeOptions();
+            };
+
+            document.addEventListener('click', (event) => {
+                if (event.target.closest?.('[data-theme-trigger]')) requestAnimationFrame(updateThemeOptions);
+            });
+
+            systemTheme.addEventListener('change', () => {
+                if (preference === 'system') applyTheme();
+            });
+
+            applyTheme();
+        })();
+    </script>
     @vite('resources/css/app.css')
     @livewireStyles
 </head>
@@ -82,24 +132,53 @@
             <header class="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-border bg-background px-4 sm:px-6">
                 <april:sidebar-trigger aria-label="Toggle navigation" />
 
-                <april:dropdown-menu x-teleport="body">
-                    <slot:trigger>
-                        <button type="button" class="inline-flex min-h-9 items-center gap-2 rounded-md px-2 text-sm font-medium text-foreground outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2" aria-label="Account menu for {{ auth()->user()->name }}">
-                            <span class="hidden max-w-40 truncate sm:inline">{{ auth()->user()->name }}</span>
-                            <svg aria-hidden="true" class="size-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="m7 10 5 5 5-5" />
-                            </svg>
-                        </button>
-                    </slot:trigger>
-                    <slot:content class="w-56">
-                        <april:dropdown-menu-label>{{ auth()->user()->email }}</april:dropdown-menu-label>
-                        <april:dropdown-menu-separator />
-                        <form method="POST" action="{{ route('logout') }}">
-                            @csrf
-                            <april:dropdown-menu-item type="submit">Sign out</april:dropdown-menu-item>
-                        </form>
-                    </slot:content>
-                </april:dropdown-menu>
+                <div class="flex items-center gap-1.5">
+                    <april:dropdown-menu x-teleport="body">
+                        <slot:trigger>
+                            <button type="button" data-theme-trigger class="inline-flex size-9 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2" aria-label="Color theme" title="Color theme">
+                                <svg aria-hidden="true" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <circle cx="12" cy="12" r="4" />
+                                    <path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" />
+                                </svg>
+                            </button>
+                        </slot:trigger>
+                        <slot:content class="w-44">
+                            <april:dropdown-menu-label>Appearance</april:dropdown-menu-label>
+                            <april:dropdown-menu-separator />
+                            <april:dropdown-menu-item data-theme-option="system" role="menuitemradio" aria-checked="false" x-on:click="window.laravelManagerSetTheme('system')">
+                                <span>System</span>
+                                <svg data-theme-check aria-hidden="true" class="ml-auto size-4 hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4 4L19 6" /></svg>
+                            </april:dropdown-menu-item>
+                            <april:dropdown-menu-item data-theme-option="light" role="menuitemradio" aria-checked="false" x-on:click="window.laravelManagerSetTheme('light')">
+                                <span>Light</span>
+                                <svg data-theme-check aria-hidden="true" class="ml-auto size-4 hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4 4L19 6" /></svg>
+                            </april:dropdown-menu-item>
+                            <april:dropdown-menu-item data-theme-option="dark" role="menuitemradio" aria-checked="false" x-on:click="window.laravelManagerSetTheme('dark')">
+                                <span>Dark</span>
+                                <svg data-theme-check aria-hidden="true" class="ml-auto size-4 hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4 4L19 6" /></svg>
+                            </april:dropdown-menu-item>
+                        </slot:content>
+                    </april:dropdown-menu>
+
+                    <april:dropdown-menu x-teleport="body">
+                        <slot:trigger>
+                            <button type="button" class="inline-flex min-h-9 items-center gap-2 rounded-md px-2 text-sm font-medium text-foreground outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2" aria-label="Account menu for {{ auth()->user()->name }}">
+                                <span class="hidden max-w-40 truncate sm:inline">{{ auth()->user()->name }}</span>
+                                <svg aria-hidden="true" class="size-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="m7 10 5 5 5-5" />
+                                </svg>
+                            </button>
+                        </slot:trigger>
+                        <slot:content class="w-56">
+                            <april:dropdown-menu-label>{{ auth()->user()->email }}</april:dropdown-menu-label>
+                            <april:dropdown-menu-separator />
+                            <form method="POST" action="{{ route('logout') }}">
+                                @csrf
+                                <april:dropdown-menu-item type="submit">Sign out</april:dropdown-menu-item>
+                            </form>
+                        </slot:content>
+                    </april:dropdown-menu>
+                </div>
             </header>
 
             <div class="min-w-0 px-4 py-8 sm:px-6 lg:px-8">

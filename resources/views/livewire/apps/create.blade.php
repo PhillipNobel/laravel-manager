@@ -7,7 +7,7 @@
             Apps
         </a>
         <h1 class="mt-4 text-2xl font-semibold tracking-tight">Create App</h1>
-        <p class="mt-1.5 text-sm text-muted-foreground">Choose a GitHub repository and set its application domain.</p>
+        <p class="mt-1.5 text-sm text-muted-foreground">Choose an existing repository or create a private Laravel repository.</p>
     </div>
 
     @if (! $githubConnected)
@@ -18,20 +18,9 @@
             </div>
             <april:button-link href="{{ route('settings') }}" variant="outline">Open Settings</april:button-link>
         </div>
-    @elseif ($repositoryLoadError)
-        <div class="space-y-3 rounded-lg border border-destructive/30 bg-destructive/5 p-5" role="alert">
-            <p class="text-sm leading-6">{{ $repositoryLoadError }}</p>
-            <april:button-link href="{{ route('settings') }}" variant="outline">Open Settings</april:button-link>
-        </div>
-    @elseif (count($repositories) === 0)
-        <div class="space-y-3 rounded-lg border border-border bg-card p-5" role="status">
-            <div>
-                <h2 class="text-sm font-medium">No GitHub repositories available</h2>
-                <p class="mt-1 text-sm leading-6 text-muted-foreground">Connect an account with access to a repository, then return here.</p>
-            </div>
-            <april:button-link href="{{ route('settings') }}" variant="outline">Open Settings</april:button-link>
-        </div>
-    @else
+    @endif
+
+    @if ($githubConnected)
     <form wire:submit="save" class="space-y-6">
         <div class="space-y-2">
             <label for="name" class="text-sm font-medium">Application name</label>
@@ -59,27 +48,75 @@
         </div>
 
         <div class="space-y-2">
-            <label for="repositoryName" class="text-sm font-medium">GitHub repository</label>
-            <april:native-select id="repositoryName" wire:model.live.change="repositoryName" class="w-full" :aria-describedby="$errors->has('repositoryName') ? 'repository-hint repositoryName-error' : 'repository-hint'" :aria-invalid="$errors->has('repositoryName') ? 'true' : 'false'">
-                <option value="">Select a repository</option>
-                @foreach ($repositories as $repository)
-                    <option value="{{ $repository['full_name'] }}">{{ $repository['full_name'] }} · {{ $repository['visibility'] }}</option>
-                @endforeach
+            <label for="repositorySource" class="text-sm font-medium">Repository</label>
+            <april:native-select id="repositorySource" wire:model.live.change="repositorySource" class="w-full" :aria-describedby="$errors->has('repositorySource') ? 'repository-source-hint repositorySource-error' : 'repository-source-hint'" :aria-invalid="$errors->has('repositorySource') ? 'true' : 'false'">
+                <option value="existing">Use an existing repository</option>
+                <option value="new">Create a new private repository</option>
             </april:native-select>
-            <p id="repository-hint" class="text-sm text-muted-foreground">Choose a repository available to the connected GitHub account.</p>
-            @error('repositoryName')
-                <p id="repositoryName-error" class="text-sm text-destructive" role="alert">{{ $message }}</p>
+            <p id="repository-source-hint" class="text-sm text-muted-foreground">New repositories are private and start with a Laravel application skeleton.</p>
+            @error('repositorySource')
+                <p id="repositorySource-error" class="text-sm text-destructive" role="alert">{{ $message }}</p>
             @enderror
         </div>
 
-        <div class="grid gap-5 sm:grid-cols-2">
-            <div class="space-y-2">
-                <label for="branch" class="text-sm font-medium">Branch</label>
-                <april:input id="branch" wire:model="branch" autocomplete="off" :aria-describedby="$errors->has('branch') ? 'branch-error' : null" :aria-invalid="$errors->has('branch') ? 'true' : 'false'" />
-                @error('branch')
-                    <p id="branch-error" class="text-sm text-destructive" role="alert">{{ $message }}</p>
-                @enderror
+        @if ($repositorySource === 'existing')
+            @if ($repositoryLoadError)
+                <div class="rounded-md border border-destructive/30 bg-destructive/5 px-3.5 py-3 text-sm leading-6" role="alert">
+                    {{ $repositoryLoadError }} Choose “Create a new private repository” to continue, or reconnect GitHub in Settings.
+                    @error('repositoryName')
+                        <span class="mt-1 block">{{ $message }}</span>
+                    @enderror
+                </div>
+            @elseif (count($repositories) === 0)
+                <div class="rounded-md border border-border bg-muted/50 px-3.5 py-3 text-sm leading-6 text-muted-foreground" role="status">
+                    No GitHub repositories are available. Choose “Create a new private repository” above to start a Laravel app.
+                    @error('repositoryName')
+                        <span class="mt-1 block text-destructive">{{ $message }}</span>
+                    @enderror
+                </div>
+            @else
+                <div class="space-y-2">
+                    <label for="repositoryName" class="text-sm font-medium">Existing repository</label>
+                    <april:native-select id="repositoryName" wire:model.live.change="repositoryName" class="w-full" :aria-describedby="$errors->has('repositoryName') ? 'repository-hint repositoryName-error' : 'repository-hint'" :aria-invalid="$errors->has('repositoryName') ? 'true' : 'false'">
+                        <option value="">Select a repository</option>
+                        @foreach ($repositories as $repository)
+                            <option value="{{ $repository['full_name'] }}">{{ $repository['full_name'] }} · {{ $repository['visibility'] }}</option>
+                        @endforeach
+                    </april:native-select>
+                    <p id="repository-hint" class="text-sm text-muted-foreground">Choose a repository available to the connected GitHub account.</p>
+                    @error('repositoryName')
+                        <p id="repositoryName-error" class="text-sm text-destructive" role="alert">{{ $message }}</p>
+                    @enderror
+                </div>
+            @endif
+        @else
+            <div class="space-y-2 rounded-md border border-border bg-muted/40 px-3.5 py-3">
+                <p class="text-sm font-medium">New private repository</p>
+                @if ($this->domainPreview)
+                    <code class="block break-all font-mono text-sm text-foreground">{{ $githubLogin }}/{{ strtolower(trim($subdomain)) }}</code>
+                @else
+                    <p class="text-sm text-muted-foreground">Enter a valid subdomain to preview the repository name.</p>
+                @endif
+                <p class="text-sm leading-6 text-muted-foreground">Laravel Manager creates the repository and pushes the starter to <code class="font-mono text-xs">main</code>. Dependencies are installed during deployment.</p>
             </div>
+        @endif
+
+        <div class="grid gap-5 sm:grid-cols-2">
+            @if ($repositorySource === 'existing')
+                <div class="space-y-2">
+                    <label for="branch" class="text-sm font-medium">Branch</label>
+                    <april:input id="branch" wire:model="branch" autocomplete="off" :aria-describedby="$errors->has('branch') ? 'branch-error' : null" :aria-invalid="$errors->has('branch') ? 'true' : 'false'" />
+                    @error('branch')
+                        <p id="branch-error" class="text-sm text-destructive" role="alert">{{ $message }}</p>
+                    @enderror
+                </div>
+            @else
+                <div class="space-y-2">
+                    <span class="text-sm font-medium">Branch</span>
+                    <div class="flex h-10 items-center rounded-md border border-border bg-muted/50 px-3 text-sm text-foreground"><code class="font-mono">main</code></div>
+                    <p class="text-sm text-muted-foreground">The starter's initial branch is <code class="font-mono text-xs">main</code>.</p>
+                </div>
+            @endif
 
             <div class="space-y-2">
                 <label for="phpVersion" class="text-sm font-medium">PHP version</label>
@@ -134,7 +171,7 @@
             </p>
         @endif
 
-        <p class="rounded-md bg-muted/60 px-3.5 py-3 text-sm leading-6 text-muted-foreground">Laravel Manager will clone the selected branch and prepare the app directory and environment. It will not run project code or install dependencies.</p>
+        <p class="rounded-md bg-muted/60 px-3.5 py-3 text-sm leading-6 text-muted-foreground">Laravel Manager prepares the app directory and production environment. For a new repository, it creates only the Laravel starter; dependencies are installed on deployment.</p>
 
         <div class="flex flex-col-reverse gap-3 border-t border-border pt-5 sm:flex-row sm:justify-end">
             <april:button-link href="{{ route('apps.index') }}" variant="outline">Cancel</april:button-link>

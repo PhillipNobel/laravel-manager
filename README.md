@@ -4,7 +4,7 @@ Laravel Manager is a self-hosted web application for managing Laravel applicatio
 
 ## Project status
 
-RUN 01 through RUN 16 are complete. A first-run setup guides the administrator through server defaults, read-only environment checks, optional GitHub connection, and manual wildcard DNS confirmation before opening Apps. Settings hold this server's identity, Laravel app defaults, and GitHub connection. The protected Server page shows local environment details and read-only software and service checks. Create App lets the administrator choose PHP 8.2, 8.3, or 8.4 and MySQL or PostgreSQL for each app. Protected Project actions configure its PHP-FPM virtual host, create and verify a dedicated database, deploy manually or after a matching GitHub push, and enable HTTPS with Let's Encrypt.
+RUN 01 through RUN 18 are complete. A first-run setup guides the administrator through server defaults, read-only environment checks, optional GitHub connection, and manual wildcard DNS confirmation before opening Apps. Settings hold this server's identity, Laravel app defaults, and GitHub connection. The protected Server page shows local environment details and read-only software and service checks. Create App lets the administrator choose PHP 8.2, 8.3, or 8.4 and MySQL or PostgreSQL for each app. Protected Project actions configure its PHP-FPM virtual host, create and verify a dedicated database, deploy manually or after a matching GitHub push, and enable HTTPS with Let's Encrypt. The authenticated header offers System, Light, and Dark themes; an explicit choice is saved in the current browser.
 
 Laravel Manager itself stays on PHP 8.3 and uses MySQL in production. The server installer installs the supported app PHP-FPM runtimes and database services up front. Create App shows unavailable choices as disabled with the missing requirement; it never installs server packages from a web request.
 
@@ -44,6 +44,90 @@ LARAVEL_MANAGER_REPOSITORY=https://github.com/PhillipNobel/laravel-manager.git b
 The installer changes the host and does not roll back completed package or service changes if a later step fails. It refuses to overwrite existing Laravel Manager paths. Review failures on a disposable clean VPS before retrying. It adds only the TCP 8080 allow rule when UFW is already active, or the supported rule in Oracle's persistent iptables file; it does not change SSH or cloud/provider firewall rules, DNS, or unrelated services. Configure the applications domain and other server values in Settings after login. Commit `9210f04` passed a clean Ubuntu 24.04 arm64 Multipass installation test, including login, manager pages at desktop/mobile sizes, all four services, the database, and both sudoers checks.
 
 Port 8080 serves Laravel Manager over plain HTTP. After installation, allow inbound TCP 8080 in the VPS subnet/security list; the installer handles supported local UFW and Oracle Ubuntu firewall formats. Restrict the cloud rule's source to your trusted IP where possible, because HTTP does not encrypt passwords or session cookies. Ports 80 and 443 serve managed application sites and certificates. The Manager itself does not provision TLS.
+
+### VPS DNS, firewall, and first access
+
+The cloud firewall and the Ubuntu host firewall are separate. A request can reach Apache only when both allow it. The installer can add TCP 8080 to supported host firewall configurations; it does not edit Oracle Cloud security lists/NSGs or DNS records. In OCI, add an ingress rule to the instance's subnet security list or attached network security group for TCP 8080, preferably limited to your current public IP while using the initial HTTP address. Oracle documents [security lists](https://docs.oracle.com/en-us/iaas/Content/Network/Concepts/securitylists.htm) and [NSG security rules](https://docs.oracle.com/en-us/iaas/Content/Network/Concepts/manage-nsg-security-rules.htm).
+
+For a Manager hostname, create a Cloudflare `A` record such as `manager.example.com` pointing to the VPS public IPv4. Keep it **DNS only** (gray cloud) while checking direct origin access. Add an `AAAA` record only if the VPS has working public IPv6; an incorrect AAAA record can make clients attempt an unreachable IPv6 address. Cloudflare explains [A/AAAA record behavior](https://developers.cloudflare.com/dns/manage-dns-records/reference/dns-record-types/) and the difference between [DNS-only and proxied records](https://developers.cloudflare.com/dns/proxy-status/). If an app wildcard is used, create `*.apps.example.com` pointing to the same public IPv4; Laravel Manager does not create DNS records.
+
+Allow inbound TCP 80 and 443 in the provider firewall when serving managed apps or requesting Let's Encrypt HTTP-01 certificates. Keep SSH (TCP 22) restricted to trusted addresses. For the initial Manager login, allow TCP 8080 only from your IP when possible. The installer adds a host rule when it recognizes active UFW or the supported Oracle Ubuntu iptables file, but a provider rule is still needed. If `ufw` is not installed on an Oracle image, inspect the active iptables/nftables rules instead; `ufw: command not found` alone does not indicate that the host has no firewall.
+
+Check the Manager listener and local response on the VPS:
+
+```bash
+sudo ss -lntp | grep ':8080' || true
+curl -sS -o /dev/null -w 'HTTP %{http_code}\n' http://127.0.0.1:8080/login
+sudo iptables -S INPUT | grep -- '--dport 8080' || echo HOST_RULE_MISSING
+sudo grep -nE -- '--dport (22|80|443|8080)' /etc/iptables/rules.v4 2>/dev/null || true
+```
+
+Then test from your computer using the public address:
+
+```bash
+curl -v --connect-timeout 5 http://PUBLIC_IP:8080/login
+```
+
+An HTTP 200 from `127.0.0.1` proves Apache and Laravel are responding locally. If the outside request is refused or times out, check the host INPUT chain and the OCI subnet/NSG ingress rule independently. On the Oracle Ubuntu firewall format used by this installer, an allow rule must come before the final reject. Back up the persistent file, then insert the following rule after the SSH allow rule and before the final reject:
+
+```text
+-A INPUT -p tcp -m state --state NEW -m tcp --dport 8080 -j ACCEPT
+```
+
+Validate and apply the complete file, then save the active rules when `netfilter-persistent` is installed:
+
+```bash
+sudo cp -a /etc/iptables/rules.v4 /etc/iptables/rules.v4.bak
+sudoedit /etc/iptables/rules.v4
+sudo iptables-restore --test < /etc/iptables/rules.v4
+sudo iptables-restore < /etc/iptables/rules.v4
+if command -v netfilter-persistent >/dev/null; then sudo netfilter-persistent save; fi
+```
+
+Keep the SSH rule and all existing cloud-image service rules; do not flush or replace the ruleset.
+
+If the login page returns 200 but its assets or Livewire requests point to a private address such as `10.x.x.x`, set `APP_URL` to the same browser-reachable public IP and port or the Manager HTTPS hostname. The installer now detects the public IPv4 and uses it by default; set `MANAGER_URL` during installation when using a domain or another public URL. On an existing installation, edit the environment file as root and run Artisan as the web user with the absolute project path; the source directory is intentionally not readable by the `ubuntu` shell user:
+
+```bash
+sudoedit /opt/laravel-manager/.env
+# Set APP_URL=http://PUBLIC_IP:8080 or APP_URL=https://manager.example.com
+sudo -u www-data /usr/bin/php8.3 /opt/laravel-manager/artisan optimize
+sudo systemctl reload php8.3-fpm
+```
+
+Do not run `composer update` on the VPS to fix an `APP_URL` change. When browser access works, test login and the Livewire interactions before closing port 8080 at the provider firewall.
+
+### HTTPS for the Laravel Manager panel
+
+The installer exposes the Manager on HTTP port 8080. For regular use, put Apache TLS on the Manager hostname and reverse-proxy it to `http://127.0.0.1:8080`. This proxy is configured by the server administrator; Laravel Manager's **Enable HTTPS** action applies to managed Laravel apps, not the Manager panel. First point the Manager `A` record to this server and allow TCP 80/443 in the provider firewall. Before requesting a certificate, Apache must have an enabled HTTP virtual host whose `ServerName` matches the Manager hostname, and the hostname must resolve to this VPS. Follow the [Certbot Apache instructions](https://certbot.eff.org/instructions), then check the generated `*:443` virtual host and make sure it contains a reverse proxy to the local port 8080. A typical TLS virtual host includes:
+
+```apache
+<VirtualHost *:443>
+    ServerName manager.example.com
+    SSLEngine on
+    SSLCertificateFile /etc/letsencrypt/live/manager.example.com/fullchain.pem
+    SSLCertificateKeyFile /etc/letsencrypt/live/manager.example.com/privkey.pem
+
+    ProxyRequests Off
+    ProxyPreserveHost Off
+    ProxyPass / http://127.0.0.1:8080/
+    ProxyPassReverse / http://127.0.0.1:8080/
+    RequestHeader set X-Forwarded-Host "manager.example.com"
+    RequestHeader set X-Forwarded-Proto "https"
+    RequestHeader set X-Forwarded-Port "443"
+</VirtualHost>
+```
+
+Enable Apache's `proxy`, `proxy_http`, `headers`, and `ssl` modules if needed. Keep `ProxyRequests` off; Apache's [reverse proxy documentation](https://httpd.apache.org/docs/2.4/mod/mod_proxy.html) describes the `ProxyPass` directives. Laravel Manager trusts forwarded headers only from `127.0.0.1`, so keep the proxy upstream on loopback as shown. Configure the `*:80` vhost to redirect ordinary Manager requests to HTTPS while leaving Certbot's HTTP-01 challenge available. Check the configuration with `sudo apache2ctl configtest`, reload Apache, and verify from your computer:
+
+```bash
+curl -I https://manager.example.com/login
+curl -I http://manager.example.com/login
+```
+
+The expected responses are HTTPS 200 and HTTP 301. Set `APP_URL=https://manager.example.com` and `SESSION_SECURE_COOKIE=true` in `/opt/laravel-manager/.env`, rebuild Laravel's cached configuration as `www-data` using the command above, and confirm login, CSS/JS, secure session cookies, and Livewire updates work through HTTPS. Once verified, remove public TCP 8080 from the OCI security list/NSG and host firewall if it was opened solely for initial setup. Keep the local Apache listener on 8080 for the reverse proxy.
+
+If the hostname is orange-cloud proxied in Cloudflare, set the zone SSL/TLS mode to **Full (strict)** after Apache has a valid, unexpired origin certificate for that hostname. This mode requires HTTPS at the origin and a certificate valid for the requested host; see Cloudflare's [Full (strict) requirements](https://developers.cloudflare.com/ssl/origin-configuration/ssl-modes/full-strict/). With DNS-only gray cloud, clients connect directly to the VPS certificate.
 
 ### Updating Laravel Manager
 
@@ -138,7 +222,7 @@ Software checks run fixed local commands with a two-second timeout and confirm t
 
 ## GitHub connection
 
-Laravel Manager uses a GitHub OAuth App for the single administrator's GitHub account. Create an OAuth App in GitHub Developer Settings, set its homepage URL to the Laravel Manager URL, and set its authorization callback URL to:
+Laravel Manager uses a GitHub OAuth App for the single administrator's GitHub account. Configure DNS and HTTPS for the Manager hostname first so GitHub can send the browser back to a stable public HTTPS address. In GitHub **Settings → Developer settings → OAuth Apps**, create an OAuth App, use the Manager address as its homepage URL, and register this exact callback/redirect URI (GitHub's form label can vary):
 
 ```text
 https://YOUR-MANAGER-HOST/settings/github/callback
@@ -152,15 +236,27 @@ GITHUB_CLIENT_SECRET=your-oauth-app-client-secret
 GITHUB_REDIRECT_URI=https://YOUR-MANAGER-HOST/settings/github/callback
 ```
 
-The redirect URI must exactly match the callback URL registered in the OAuth App. After changing environment values, run `php artisan config:clear`, then open **Settings → GitHub → Connect GitHub**.
+The redirect URI must exactly match the callback URL registered in the OAuth App. During local development, run `php artisan config:clear` after changing environment values. On an installed VPS, use the `www-data` Artisan commands below so cached configuration is rebuilt with the correct ownership.
 
-The authorization asks for the `repo` scope so the manager can list private repositories as well as public repositories. GitHub's OAuth `repo` scope grants broad access to private repositories for that account. The flow uses one-time `state` and PKCE verification. Laravel Manager validates the account, stores the OAuth token encrypted using `APP_KEY`, and never displays it. Keep `APP_KEY` stable while a GitHub connection is stored; changing it requires reconnecting GitHub.
+On an installed VPS, add the Client ID and Client Secret to `/opt/laravel-manager/.env` without sharing or committing the secret, then rebuild configuration as the application account:
+
+```bash
+sudoedit /opt/laravel-manager/.env
+sudo -u www-data /usr/bin/php8.3 /opt/laravel-manager/artisan optimize
+sudo systemctl reload php8.3-fpm
+```
+
+Use the same URL and callback in the OAuth App and `.env`, including `https://`, hostname, path, and trailing-slash choice. GitHub OAuth callback URLs must match what the app sends; do not use wildcard callback hosts. Sign in to the Manager, open **Settings → GitHub → Connect GitHub**, approve the requested access, and confirm the account and repository list appear. The OAuth flow uses a one-time `state` value and PKCE. GitHub's documentation covers [OAuth App authorization and callback URLs](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps).
+
+The authorization asks for the `repo` scope so the manager can list private repositories as well as public repositories. GitHub's OAuth `repo` scope grants broad access to private repositories for that account; review the [scope description](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps) and consider a dedicated GitHub account that can access only the repositories it should manage. Laravel Manager stores the OAuth token encrypted using `APP_KEY` and never displays it. Keep `APP_KEY` stable while a GitHub connection is stored; changing it requires reconnecting GitHub.
 
 Settings lists up to 100 repositories sorted by recent activity, with visibility and default branch. **Disconnect** revokes the OAuth token at GitHub before deleting the local connection. The administrator configures repository webhooks in GitHub; Laravel Manager does not create them through the GitHub API.
 
 ## Creating an application
 
-Connect GitHub in **Settings**, then open **Apps → Create App**. Enter an application name and subdomain, select a repository, and choose a branch, PHP version, and database engine. The branch defaults to the selected repository's default branch. The domain is generated from the configured base applications domain. PHP and database options that are missing a server prerequisite remain visible but disabled, with the needed package or service shown beside the control. Laravel Manager checks those requirements again when saving, so a browser request cannot bypass the disabled state.
+Connect GitHub in **Settings**, then open **Apps → Create App**. Enter an application name and subdomain, then choose either an existing repository or **Create a new private repository**. New repository names come from the subdomain and appear under the connected GitHub account; they start on `main`. Laravel Manager creates a Laravel starter compatible with the selected PHP version, commits it, creates a private GitHub repository, pushes `main`, then provisions the project from that repository. PHP 8.2 uses Laravel 12; PHP 8.3 and 8.4 use Laravel 13. Composer does not install dependencies or run scripts during app creation; deployment installs dependencies later. If GitHub created the repository but the push failed, the failed Project retains the repository link so the failure can be investigated without losing the remote repository.
+
+For an existing repository, choose its branch, PHP version, and database engine. The branch defaults to the selected repository's default branch. The domain is generated from the configured base applications domain. PHP and database options that are missing a server prerequisite remain visible but disabled, with the needed package or service shown beside the control. Laravel Manager checks those requirements again when saving, so a browser request cannot bypass the disabled state.
 
 Laravel Manager rechecks repository access, validates the branch, then clones the selected branch into:
 
@@ -170,7 +266,7 @@ Laravel Manager rechecks repository access, validates the branch, then clones th
 
 It refuses to overwrite an existing path. The configured applications directory must be writable by the operating-system user running Laravel Manager. New application and runtime directories receive restrictive, explicit permissions; generated `.env` files are owner-only (`0600`). The production installer creates `/var/www/apps` for `www-data` and configures PHP-FPM access.
 
-For a repository with `artisan`, `composer.json`, and `.env.example`, Laravel Manager creates `.env` with a fresh application key, `APP_ENV=production`, `APP_DEBUG=false`, and the generated application URL. The GitHub token is supplied only through temporary Git process configuration and is not stored in the repository, project record, or provisioning log. App creation does not run Composer, Artisan, npm, or repository-provided code. Use **Deploy now** after database setup to install dependencies and run application commands.
+For a repository with `artisan`, `composer.json`, and `.env.example`, Laravel Manager creates `.env` with a fresh application key, `APP_ENV=production`, `APP_DEBUG=false`, and the generated application URL. The GitHub token is supplied only through temporary Git process configuration and is not stored in the repository, project record, or provisioning log. For a new repository, Composer only fetches the official Laravel starter; dependency installation, plugins, scripts, Artisan, npm, and repository-provided code do not run during app creation. Existing repositories are cloned without running their code. Use **Deploy now** after database setup to install dependencies and run application commands.
 
 The Project page shows the current status, path, and bounded provisioning log. If creation fails, fix the repository or server path and choose an unused subdomain for another attempt; the failed project's domain remains recorded.
 
@@ -206,6 +302,8 @@ sudo apt install certbot python3-certbot-apache
 ```
 
 Certbot packages provide an automatic renewal schedule through cron or a systemd timer. Confirm the package's scheduler is present and test renewal with `sudo certbot renew --dry-run`. Laravel Manager installs a fixed deploy hook at `/etc/letsencrypt/renewal-hooks/deploy/laravel-manager-apache-reload`; after a successful renewal it runs only `systemctl reload apache2`. This RUN does not install packages or create Cloudflare DNS records.
+
+Let's Encrypt's HTTP-01 check needs the application's public hostname to resolve to this VPS and inbound TCP 80 to reach Apache; see the [HTTP-01 challenge requirements](https://letsencrypt.org/docs/challenge-types/#http-01-challenge). Ensure the hostname's A/AAAA records point only to working public addresses. Allow TCP 443 for visitors after the HTTPS virtual host is enabled. The Manager checks the certificate hostname and expiry; it does not validate Cloudflare DNS settings.
 
 After deploying an update, refresh the root-owned helper and its narrow sudo rule using the Apache installation commands above, then validate the rule with `sudo visudo -cf /etc/sudoers.d/laravel-manager-apache`. The helper does not run Certbot from a web request: Laravel queues the operation, and the queue worker calls only the allowlisted helper. Tests fake that process call and render Apache templates without contacting Let's Encrypt or modifying a server.
 
@@ -267,4 +365,4 @@ RUN 08 does not create repository webhooks through the GitHub API. RUN 10 adds a
 
 ## Roadmap
 
-See [RUNS.md](RUNS.md). RUN 01 through RUN 16 are complete. The roadmap has no pending RUN; scope new work explicitly before starting it.
+See [RUNS.md](RUNS.md). RUN 01 through RUN 18 are complete. Do not begin another RUN until explicitly requested.

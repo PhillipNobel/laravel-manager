@@ -5,11 +5,14 @@
 @source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
 @source '../../storage/framework/views/*.php';
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
     --font-sans: ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji';
 }
 
 :root {
+    color-scheme: light;
     --background: 60 8.3% 95.3%;
     --foreground: 215.6 15.6% 33.9%;
     --card: 60 8.3% 95.3%;
@@ -38,31 +41,32 @@
 }
 
 .dark {
-    --background: 215.6 15.6% 33.9%;
+    color-scheme: dark;
+    --background: 215.6 16% 13%;
     --foreground: 60 8.3% 95.3%;
-    --card: 215.6 15.6% 33.9%;
+    --card: 215.6 14% 17%;
     --card-foreground: 60 8.3% 95.3%;
-    --popover: 215.6 15.6% 33.9%;
+    --popover: 215.6 14% 17%;
     --popover-foreground: 60 8.3% 95.3%;
-    --primary: 60 8.3% 95.3%;
-    --primary-foreground: 215.6 15.6% 33.9%;
-    --secondary: 0 0% 91%;
-    --secondary-foreground: 215.6 15.6% 33.9%;
-    --muted: 215.6 15.6% 33.9%;
-    --muted-foreground: 60 8.3% 95.3%;
-    --accent: 0 0% 91%;
-    --accent-foreground: 215.6 15.6% 33.9%;
-    --border: 224 12.4% 76.3%;
-    --input: 224 12.4% 76.3%;
-    --ring: 224 12.4% 76.3%;
-    --sidebar-background: 215.6 15.6% 33.9%;
+    --primary: 0 0% 91%;
+    --primary-foreground: 215.6 16% 13%;
+    --secondary: 215 12% 24%;
+    --secondary-foreground: 60 8.3% 95.3%;
+    --muted: 215 12% 24%;
+    --muted-foreground: 220 10% 76%;
+    --accent: 215 12% 24%;
+    --accent-foreground: 60 8.3% 95.3%;
+    --border: 215 11% 30%;
+    --input: 215 11% 42%;
+    --ring: 220 10% 76%;
+    --sidebar-background: 215.6 15% 15%;
     --sidebar-foreground: 60 8.3% 95.3%;
-    --sidebar-primary: 60 8.3% 95.3%;
-    --sidebar-primary-foreground: 215.6 15.6% 33.9%;
-    --sidebar-accent: 0 0% 91%;
-    --sidebar-accent-foreground: 215.6 15.6% 33.9%;
-    --sidebar-border: 224 12.4% 76.3%;
-    --sidebar-ring: 224 12.4% 76.3%;
+    --sidebar-primary: 0 0% 91%;
+    --sidebar-primary-foreground: 215.6 16% 13%;
+    --sidebar-accent: 215 12% 24%;
+    --sidebar-accent-foreground: 60 8.3% 95.3%;
+    --sidebar-border: 215 11% 30%;
+    --sidebar-ring: 220 10% 76%;
 }
 
 input.border-input,

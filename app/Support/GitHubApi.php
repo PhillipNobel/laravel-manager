@@ -74,6 +74,53 @@ class GitHubApi
         return array_values(array_filter($repositories, static fn (array $repository): bool => isset($repository['full_name'])));
     }
 
+    public function createPrivateRepository(string $accessToken, string $owner, string $name, string $description): array
+    {
+        if (! preg_match('/\A[A-Za-z0-9](?:[A-Za-z0-9-]{0,98}[A-Za-z0-9])?\z/', $owner)
+            || ! preg_match('/\A[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\z/', $name)
+            || $accessToken === ''
+            || preg_match('/[\r\n\0]/', $accessToken)) {
+            throw new UnexpectedValueException('The GitHub connection or repository name is invalid.');
+        }
+
+        $repository = $this->api($accessToken)
+            ->post('/user/repos', [
+                'name' => $name,
+                'description' => $description,
+                'private' => true,
+                'auto_init' => false,
+            ])
+            ->throw()
+            ->json();
+
+        if (! is_array($repository)) {
+            throw new UnexpectedValueException('GitHub returned unexpected repository details.');
+        }
+
+        $fullName = $repository['full_name'] ?? null;
+        $cloneUrl = $repository['clone_url'] ?? null;
+        $htmlUrl = $repository['html_url'] ?? null;
+        $expectedName = $owner.'/'.$name;
+
+        if (! is_string($fullName)
+            || ! hash_equals(strtolower($expectedName), strtolower($fullName))
+            || ($repository['private'] ?? false) !== true
+            || ! is_string($cloneUrl)
+            || ! hash_equals('https://github.com/'.$fullName.'.git', $cloneUrl)
+            || ! is_string($htmlUrl)
+            || ! hash_equals('https://github.com/'.$fullName, $htmlUrl)) {
+            throw new UnexpectedValueException('GitHub returned unexpected repository details.');
+        }
+
+        return [
+            'full_name' => $fullName,
+            'visibility' => 'Private',
+            'default_branch' => 'main',
+            'url' => $htmlUrl,
+            'clone_url' => $cloneUrl,
+        ];
+    }
+
     public function revokeToken(string $accessToken): void
     {
         Http::withBasicAuth(config('services.github.client_id'), config('services.github.client_secret'))

@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Apps;
 
+use App\Actions\Projects\CreateProjectRepository;
 use App\Actions\Projects\ProvisionProject;
 use App\Enums\DatabaseEngine;
 use App\Enums\ProjectStatus;
@@ -15,8 +16,10 @@ use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
+use Livewire\Attributes\Locked;
 use Livewire\Attributes\Title;
 use Livewire\Component;
+use RuntimeException;
 use Throwable;
 
 #[Layout('layouts.app')]
@@ -39,6 +42,11 @@ class Create extends Component
 
     public string $repositoryName = '';
 
+    public string $repositorySource = 'existing';
+
+    #[Locked]
+    public string $githubLogin = '';
+
     public array $repositories = [];
 
     public bool $githubConnected = false;
@@ -54,6 +62,7 @@ class Create extends Component
         }
 
         $this->githubConnected = true;
+        $this->githubLogin = $connection->login;
         $this->phpOptions = ServerEnvironment::phpOptions();
         $availablePhpVersions = collect($this->phpOptions)
             ->where('available', true)
@@ -85,6 +94,16 @@ class Create extends Component
         }
     }
 
+    public function updatedRepositorySource(): void
+    {
+        $this->resetValidation('repositorySource');
+
+        if ($this->repositorySource === 'new') {
+            $this->repositoryName = '';
+            $this->branch = 'main';
+        }
+    }
+
     public function updated(string $property): void
     {
         $this->resetValidation($property);
@@ -105,7 +124,10 @@ class Create extends Component
                 'regex:/\A[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\z/i',
                 Rule::unique('projects', 'slug'),
             ],
-            'repositoryName' => ['required', Rule::in(collect($this->repositories)->pluck('full_name')->all())],
+            'repositorySource' => ['required', Rule::in(['existing', 'new'])],
+            'repositoryName' => $this->repositorySource === 'existing'
+                ? ['required', Rule::in(collect($this->repositories)->pluck('full_name')->all())]
+                : ['exclude'],
             'branch' => ['required', 'string', 'max:120', 'regex:/\A[A-Za-z0-9][A-Za-z0-9._\/-]{0,119}\z/'],
             'phpVersion' => ['required', Rule::in(config('manager.php_versions'))],
             'databaseEngine' => ['required', Rule::in(array_column(DatabaseEngine::cases(), 'value'))],
@@ -117,6 +139,7 @@ class Create extends Component
         return [
             'repositoryName.required' => 'Choose a GitHub repository.',
             'repositoryName.in' => 'Choose a repository listed by GitHub.',
+            'repositorySource.in' => 'Choose an existing repository or create a new private repository.',
             'branch.regex' => 'Use letters, numbers, dots, hyphens, or slashes in the branch name.',
             'databaseEngine.required' => 'Choose an available database engine.',
             'databaseEngine.in' => 'Choose MySQL or PostgreSQL.',
@@ -133,12 +156,16 @@ class Create extends Component
         return DomainGenerator::generate($this->subdomain, AppSetting::valueFor('base_domain'));
     }
 
-    public function save(GitHubApi $github, ProvisionProject $provisionProject): void
+    public function save(GitHubApi $github, CreateProjectRepository $createProjectRepository, ProvisionProject $provisionProject): void
     {
         $this->name = trim($this->name);
         $this->subdomain = strtolower(trim($this->subdomain));
         $this->branch = trim($this->branch);
         $this->repositoryName = trim($this->repositoryName);
+
+        if ($this->repositorySource === 'new') {
+            $this->branch = 'main';
+        }
 
         $validated = $this->validate();
 
@@ -163,19 +190,23 @@ class Create extends Component
             return;
         }
 
-        try {
-            $repository = collect($github->repositories($connection->access_token))
-                ->firstWhere('full_name', $validated['repositoryName']);
-        } catch (Throwable) {
-            $this->addError('repositoryName', 'GitHub could not verify this repository. Try again.');
+        $repository = null;
 
-            return;
-        }
+        if ($validated['repositorySource'] === 'existing') {
+            try {
+                $repository = collect($github->repositories($connection->access_token))
+                    ->firstWhere('full_name', $validated['repositoryName']);
+            } catch (Throwable) {
+                $this->addError('repositoryName', 'GitHub could not verify this repository. Try again.');
 
-        if (! $repository || ! is_string($repository['clone_url'] ?? null)) {
-            $this->addError('repositoryName', 'Select an accessible GitHub repository.');
+                return;
+            }
 
-            return;
+            if (! $repository || ! is_string($repository['clone_url'] ?? null)) {
+                $this->addError('repositoryName', 'Select an accessible GitHub repository.');
+
+                return;
+            }
         }
 
         $baseDomain = AppSetting::valueFor('base_domain');
@@ -184,13 +215,42 @@ class Create extends Component
             'name' => $validated['name'],
             'slug' => strtolower($validated['subdomain']),
             'domain' => DomainGenerator::generate($validated['subdomain'], $baseDomain),
-            'repository_url' => $repository['url'],
-            'repository_name' => $repository['full_name'],
+            'repository_url' => $repository['url'] ?? null,
+            'repository_name' => $repository['full_name'] ?? null,
             'branch' => $validated['branch'],
             'php_version' => $validated['phpVersion'],
             'database_engine' => $databaseEngine,
             'status' => ProjectStatus::Pending,
         ]);
+
+        if ($validated['repositorySource'] === 'new') {
+            try {
+                $repository = $createProjectRepository->handle($project, $connection);
+            } catch (Throwable $exception) {
+                $project->refresh();
+
+                if ($project->repository_name === null) {
+                    $project->delete();
+                    $message = $exception instanceof RuntimeException
+                        ? $exception->getMessage()
+                        : 'GitHub could not create the private repository. Check the connected account and try again.';
+                    $this->addError('repositorySource', $message);
+
+                    return;
+                }
+
+                $project->update([
+                    'status' => ProjectStatus::Failed,
+                    'provisioning_log' => $exception instanceof RuntimeException
+                        ? $exception->getMessage()
+                        : 'The private repository was created, but its initial push failed. Check GitHub access and try again.',
+                ]);
+
+                $this->redirect(route('apps.show', $project));
+
+                return;
+            }
+        }
 
         $provisionProject->handle($project, $repository, $connection);
 
