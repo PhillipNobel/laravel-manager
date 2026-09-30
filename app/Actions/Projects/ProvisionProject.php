@@ -6,6 +6,7 @@ use App\Enums\ProjectStatus;
 use App\Models\AppSetting;
 use App\Models\GitHubConnection;
 use App\Models\Project;
+use App\Support\InfrastructureLock;
 use Illuminate\Contracts\Process\ProcessResult;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
@@ -20,6 +21,11 @@ class ProvisionProject
     private const MAX_PROCESS_OUTPUT_LENGTH = 4000;
 
     public function handle(Project $project, array $repository, GitHubConnection $connection): void
+    {
+        InfrastructureLock::run(fn () => $this->executeHandle($project, $repository, $connection));
+    }
+
+    private function executeHandle(Project $project, array $repository, GitHubConnection $connection): void
     {
         $claimed = DB::transaction(function () use ($project): bool {
             $lockedProject = Project::query()->lockForUpdate()->findOrFail($project->id);

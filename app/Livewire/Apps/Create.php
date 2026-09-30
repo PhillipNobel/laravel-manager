@@ -11,6 +11,7 @@ use App\Models\GitHubConnection;
 use App\Models\Project;
 use App\Support\DomainGenerator;
 use App\Support\GitHubApi;
+use App\Support\InfrastructureLock;
 use App\Support\ServerEnvironment;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
@@ -157,6 +158,11 @@ class Create extends Component
     }
 
     public function save(GitHubApi $github, CreateProjectRepository $createProjectRepository, ProvisionProject $provisionProject): void
+    {
+        InfrastructureLock::run(fn () => $this->executeSave($github, $createProjectRepository, $provisionProject));
+    }
+
+    private function executeSave(GitHubApi $github, CreateProjectRepository $createProjectRepository, ProvisionProject $provisionProject): void
     {
         $this->name = trim($this->name);
         $this->subdomain = strtolower(trim($this->subdomain));

@@ -5,6 +5,7 @@ namespace App\Actions\Projects;
 use App\Models\GitHubConnection;
 use App\Models\Project;
 use App\Support\GitHubApi;
+use App\Support\InfrastructureLock;
 use Illuminate\Process\PendingProcess;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Process;
@@ -17,6 +18,11 @@ class CreateProjectRepository
     public function __construct(private GitHubApi $github) {}
 
     public function handle(Project $project, GitHubConnection $connection): array
+    {
+        return InfrastructureLock::run(fn () => $this->executeHandle($project, $connection));
+    }
+
+    private function executeHandle(Project $project, GitHubConnection $connection): array
     {
         $this->validateConnection($connection);
 

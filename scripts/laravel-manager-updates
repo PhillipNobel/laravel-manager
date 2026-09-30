@@ -1,0 +1,278 @@
+#!/usr/bin/python3
+"""Fixed root bridge for Manager update status, checks, and service launch."""
+import datetime
+import fcntl
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import subprocess
+import sys
+import tempfile
+
+APP = Path('/opt/laravel-manager')
+STATE = Path('/var/lib/laravel-manager/updates')
+UNIT = 'laravel-manager-update.service'
+CLI = Path('/usr/local/bin/laravel-manager')
+GATE = Path('/run/lock/laravel-manager-operations.lock')
+LOCK = STATE / 'launch.lock'
+PHASES = {
+    'checking': 'Checking the installed source and GitHub.',
+    'waiting': 'Waiting for application operations to finish.',
+    'maintenance': 'Stopping web services for the update.',
+    'source': 'Updating Manager source.',
+    'dependencies': 'Installing Composer dependencies.',
+    'assets': 'Building frontend assets.',
+    'migrations': 'Running migrations and rebuilding caches.',
+    'restarting': 'Restoring services.',
+    'verifying': 'Checking the Manager login page.',
+    'successful': 'Update completed and the login page responded.',
+    'failed': 'Update failed. Review the server and rerun sudo laravel-manager update.',
+}
+BUSY = {'queued', 'running'}
+
+
+def timestamp():
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')
+
+
+def trusted(path, directory=False):
+    info = path.lstat()
+    kind = stat.S_ISDIR if directory else stat.S_ISREG
+    if not kind(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+        raise ValueError('Unsafe root-owned path')
+
+
+def validate():
+    if os.geteuid() != 0:
+        raise ValueError('Root required')
+    for path in [APP, APP / '.git', STATE.parent, STATE, Path('/run/lock')]:
+        # /run/lock is conventionally world writable with the sticky bit.
+        if path == Path('/run/lock'):
+            info = path.lstat()
+            if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or not info.st_mode & stat.S_ISVTX:
+                raise ValueError('Unsafe lock directory')
+        else:
+            trusted(path, directory=True)
+    for path in [APP / '.git/config', CLI, Path('/usr/local/sbin/laravel-manager-updates'),
+                 Path('/etc/systemd/system') / UNIT, Path('/var/lib/laravel-manager/installed')]:
+        trusted(path)
+    info = GATE.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o007:
+        raise ValueError('Unsafe operations lock')
+
+
+def command(args, timeout=10):
+    result = subprocess.run(args, capture_output=True, text=True, timeout=timeout,
+                            env={'PATH': '/usr/bin:/bin', 'GIT_TERMINAL_PROMPT': '0',
+                                 'GIT_CONFIG_GLOBAL': '/dev/null', 'GIT_CONFIG_NOSYSTEM': '1'})
+    if result.returncode:
+        raise ValueError('Command failed')
+    return result.stdout.strip()
+
+
+def git(*args, timeout=10):
+    return command(['/usr/bin/git', '-c', 'safe.directory=' + str(APP), '-C', str(APP), *args], timeout)
+
+
+def installed():
+    commit = git('rev-parse', 'HEAD')
+    branch = git('symbolic-ref', '--quiet', '--short', 'HEAD')
+    origin = git('remote', 'get-url', 'origin')
+    if not re.fullmatch(r'[a-f0-9]{40}', commit) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._/-]{0,119}', branch):
+        raise ValueError('Invalid checkout')
+    if not re.fullmatch(r'https://github\.com/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}(?:\.git)?', origin):
+        raise ValueError('Invalid origin')
+    git('check-ref-format', '--branch', branch)
+    return commit, branch, origin
+
+
+def read():
+    path = STATE / 'status.json'
+    if not path.exists():
+        return {}
+    trusted(path)
+    if path.stat().st_size > 16384:
+        raise ValueError('Oversized status')
+    data = json.loads(path.read_text())
+    if not isinstance(data, dict):
+        raise ValueError('Invalid status')
+    return data
+
+
+def write(data):
+    fd, name = tempfile.mkstemp(prefix='.status-', dir=STATE)
+    try:
+        with os.fdopen(fd, 'w') as stream:
+            json.dump(data, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chown(name, 0, STATE.stat().st_gid)
+        os.chmod(name, 0o640)
+        os.replace(name, STATE / 'status.json')
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
+
+
+def lock(path):
+    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    info = os.fstat(fd)
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_nlink != 1:
+        os.close(fd)
+        raise ValueError('Unsafe lock')
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(fd)
+        raise ValueError('Update already running')
+    return fd
+
+
+def updater_active():
+    fd = os.open(str(STATE.parent / 'update.lock'), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+        if os.fstat(fd).st_uid != 0:
+            raise ValueError('Unsafe updater lock')
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return False
+        except BlockingIOError:
+            return True
+    finally:
+        os.close(fd)
+
+
+def service_active():
+    result = subprocess.run(['/usr/bin/systemctl', 'is-active', UNIT], capture_output=True, text=True, timeout=3)
+    return result.stdout.strip() in {'active', 'activating', 'deactivating'}
+
+
+def status():
+    data = read()
+    current, _, _ = installed()
+    data['installed_commit'] = current
+    data['installed_version'] = git('describe', '--tags', '--always')[:60]
+    active = updater_active() or service_active()
+    queued_recently = data.get('state') == 'queued' and (datetime.datetime.now(datetime.timezone.utc) - datetime.datetime.fromisoformat(data['started_at'])).total_seconds() < 15
+    if data.get('state') in BUSY and not active and not queued_recently:
+        data['state'] = 'interrupted'
+        data['message'] = 'The update stopped. Resume with sudo laravel-manager update.'
+    elif active and data.get('state') not in BUSY:
+        data['state'] = 'running'
+        data['message'] = 'A Manager update is running.'
+    if (STATE.parent / 'update-incomplete').exists() and not active:
+        data['state'] = 'interrupted'
+        data['message'] = 'An incomplete update needs recovery. Resume with sudo laravel-manager update.'
+    data.setdefault('state', 'unchecked')
+    data.setdefault('message', 'Check for available Manager improvements.')
+    return data
+
+
+def check():
+    fd = lock(LOCK)
+    try:
+        data = status()
+        if data['state'] in BUSY or data['state'] == 'interrupted':
+            return data
+        current, branch, origin = installed()
+        try:
+            remote = git('ls-remote', '--exit-code', origin, 'refs/heads/' + branch, timeout=25)
+            target = remote.split()[0]
+            if not re.fullmatch(r'[a-f0-9]{40}', target):
+                raise ValueError('Invalid remote')
+            data.update(available_commit=target, checked_at=timestamp(),
+                        state='up_to_date' if target == current else 'available',
+                        message='Manager is up to date.' if target == current else 'A Manager update is available.')
+        except (ValueError, subprocess.SubprocessError):
+            data.update(state='unavailable', message='GitHub could not be checked. Try again later.')
+        write(data)
+        return data
+    finally:
+        os.close(fd)
+
+
+def start():
+    fd = lock(LOCK)
+    gate = None
+    try:
+        data = status()
+        if data['state'] not in {'available', 'failed', 'interrupted'}:
+            raise ValueError('No update ready')
+        gate = os.open(GATE, os.O_RDWR | os.O_NOFOLLOW)
+        fcntl.flock(gate, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        # Holds the gate while the trusted Laravel CLI reads pending/running records.
+        command(['/usr/sbin/runuser', '-u', 'www-data', '--', '/usr/bin/env', '-i',
+                 'PATH=/usr/local/bin:/usr/bin:/bin', 'HOME=/var/www',
+                 '/usr/bin/php8.3', str(APP / 'artisan'), 'manager:update-ready'], timeout=10)
+        data.update(state='queued', phase='waiting', message=PHASES['waiting'],
+                    source_commit=data['installed_commit'], started_at=timestamp(), finished_at=None)
+        write(data)
+        try:
+            command(['/usr/bin/systemctl', 'start', '--no-block', UNIT], timeout=5)
+        except (ValueError, subprocess.SubprocessError):
+            data.update(state='failed', phase='failed', message=PHASES['failed'], finished_at=timestamp())
+            write(data)
+            raise
+        return data
+    finally:
+        if gate is not None:
+            os.close(gate)
+        os.close(fd)
+
+
+def progress(phase):
+    if phase not in PHASES:
+        raise ValueError('Invalid phase')
+    data = read()
+    if phase == 'checking':
+        current, _, _ = installed()
+        data.update(started_at=timestamp(), finished_at=None, source_commit=current)
+    data.update(phase=phase, message=PHASES[phase],
+                state=phase if phase in {'successful', 'failed'} else 'running')
+    if phase in {'successful', 'failed'}:
+        data['finished_at'] = timestamp()
+        data['last_result'] = phase
+        current, _, _ = installed()
+        data['installed_commit'] = current
+        if phase == 'successful':
+            data['available_commit'] = current
+    history = data.get('history', [])[-11:]
+    if phase == 'checking':
+        history = []
+    data['history'] = history + [{'phase': phase, 'at': timestamp(), 'message': PHASES[phase]}]
+    write(data)
+
+
+def run():
+    fd = lock(LOCK)
+    try:
+        result = subprocess.run([str(CLI), 'update'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if result.returncode:
+            progress('failed')
+        return result.returncode
+    finally:
+        os.close(fd)
+
+
+def main():
+    args = sys.argv[1:]
+    if args not in [['status'], ['check'], ['start'], ['run']] and not (len(args) == 2 and args[0] == 'progress' and args[1] in PHASES):
+        return 2
+    try:
+        validate()
+        if args[0] == 'run':
+            return run()
+        if args[0] == 'progress':
+            progress(args[1])
+        else:
+            print(json.dumps({'status': status, 'check': check, 'start': start}[args[0]]()))
+        return 0
+    except (ValueError, OSError, subprocess.SubprocessError):
+        print('{"state":"unavailable","message":"Manager update prerequisites or operation checks failed. Use the root CLI to diagnose."}')
+        return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

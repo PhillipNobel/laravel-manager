@@ -1,6 +1,6 @@
 # Laravel Manager RUN Roadmap
 
-RUNs are strictly sequential. Implement only the RUN explicitly requested. RUN 01 through RUN 18 are complete. RUN 19+ are pending.
+RUNs are strictly sequential. Implement only the RUN explicitly requested. RUN 01 through RUN 19 are complete. RUN 20+ are pending.
 
 ## Required verification for every RUN
 
@@ -553,6 +553,86 @@ multipass exec laravel-manager-run11 -- sudo -u www-data bash -lc 'cd /tmp/larav
 # Stopped the exact temporary server PID and verified no listener remained on port 8082.
 ```
 
-## RUN 19+ — Pending
+## RUN 19 — Manager Updates in the Panel — Complete
+
+### Objective
+
+Allow the administrator to check for and install Laravel Manager improvements from Settings, reusing the RUN 15 updater. Keep the existing CLI recovery path available.
+
+### Desired flow
+
+```text
+Settings → Manager updates → Check for updates
+    → Review available update → Update now → Confirm interruption
+    → Update runs independently → Panel reconnects → Result
+```
+
+### Scope
+
+- Add a Manager updates section to Settings without adding another primary navigation item.
+- Display the installed version/tag when available, short commit, available commit, last check, and last update result. Do not require tagged releases: the current installation follows its installed GitHub origin and branch.
+- Provide explicit Check for updates and Update now actions. Show checking, up to date, update available, unavailable, queued, running, successful, failed, and interrupted states where appropriate.
+- Confirm before updating. Explain that the Manager and managed applications can be temporarily unavailable because the existing updater stops shared Apache and active PHP-FPM services.
+- Reuse `sudo laravel-manager update` as the update engine: fast-forward source, Composer dependencies, frontend build, migrations, caches, permission restoration, service restart, and local login verification.
+- Execute updates through a dedicated root-owned systemd service that survives the HTTP request and the Manager queue shutdown. Do not execute the update in a controller, Livewire request, or Manager queue job.
+- Record bounded, sanitized progress and outcome outside the Manager checkout and database, using atomic root-owned status files readable by the Manager. Persist source/target commits, phase, timestamps, and a safe error summary; never expose raw secrets or unrestricted system logs.
+- Let the browser reconnect after the interruption and display the recorded result. Support safe manual retry/resume through the existing interrupted-update mechanism; retain the CLI as a recovery path when the panel cannot boot.
+- Integrate the launcher, service, and exact permissions into new installations and the root CLI update path. Existing servers need one CLI update to receive this capability; do not require reinstalling or recreating their database.
+- Disable the update action in local development or when the installed launcher is missing, with a clear requirement and documented CLI bootstrap instruction.
+
+### Execution and security design
+
+- RUN 15 currently forbids web-triggered updates. This RUN introduces only a fixed launcher for checking and starting the dedicated update service; AGENTS.md explicitly documents to describe that exception.
+- Keep the updater, launcher, systemd unit, Git metadata, and update state root-owned. The web user must never receive permission to invoke the general updater, a shell, arbitrary `systemctl`, or file-writing commands through sudo.
+- Accept no repository, branch, path, commit, command, or service name from the browser. Derive the source from the validated installed Git origin and branch. The root updater rechecks the remote before execution; the displayed available commit is informational and may advance before installation.
+- Require administrator authentication and CSRF protection for starting an update. A confirmation dialog must describe the interruption and current lack of automatic database rollback.
+- Serialize CLI and panel updates with the same operating-system lock. A repeated click or request must not start another updater. Bound update checks and avoid launching repeated checks during polling.
+- Coordinate with provisioning/deployment operations: reject or defer an update while an operation is running and prevent new operations from starting once an update is accepted. The CLI waits at most 30 seconds for the shared operations lock and rechecks pending/running records before maintenance.
+- Preserve `.env`, APP_KEY, administrator accounts, settings, projects, deployment history, and application directories. Never rerun initial setup or overwrite existing data. Preserve root ownership before restarting web services.
+- Keep the current trusted-repository model explicit: Manager and managed applications share `www-data`. A narrow launcher is not per-project isolation. Root must validate its own inputs and installation state independently of Laravel.
+- Keep progress free of OAuth tokens, database passwords, environment values, and sensitive Composer/Git diagnostics. Expose only allowlisted phases and bounded sanitized messages.
+- No automatic database migration rollback is promised. If the update fails or the UI cannot reconnect, show the recovery command and retain durable status for diagnosis.
+
+### Acceptance criteria
+
+- Settings shows accurate installed and available commits, handles unavailable GitHub/network access, and does not offer an update when already current.
+- Only an authenticated administrator can request an update; forged requests, unsupported inputs, duplicate requests, and missing launcher prerequisites are rejected.
+- Starting an update returns promptly; the dedicated service continues when Apache, PHP-FPM, and the Manager queue stop.
+- CLI and UI share concurrency protection. Busy provisioning/deployment blocks an update, and an accepted update blocks new infrastructure work.
+- The panel reconnects after services return and shows success only after the local login health check passes. Failed and interrupted updates show a useful safe explanation and documented recovery steps.
+- A dirty checkout or non-fast-forward remote blocks the update without damaging the installation. The existing interrupted-update recovery remains usable.
+- New installs include the required OS integration. An existing install can gain panel updates through the documented CLI update without a reinstall.
+- Existing Manager data, secrets, setup completion, managed application files, ownership, and service configuration survive an update.
+- Pest covers authentication, update states, check failures, launch validation, duplicate requests, busy operations, and safe status rendering. Fake all HTTP/process calls in Laravel tests.
+- Helper/service tests cover argument rejection, root ownership, state-file safety, locking, interrupted execution, and sanitized output without updating the development host.
+- Run relevant tests, the complete Pest suite, formatting checks, and the frontend build successfully.
+- Use Context7 for current Laravel/Livewire/process behavior and official systemd documentation for service execution. Apply Caveman to reuse the updater and avoid a second update engine.
+- Use April UI and Impeccable for Settings composition, confirmation, status feedback, accessibility, and both light/dark themes. Verify desktop/mobile interactions, reconnect behavior, and console through Chrome DevTools MCP.
+- Inspect and test on the existing Ubuntu 24.04 Multipass VM `laravel-manager-run11`; preserve its data. Verify the real launch, service interruption/restart, status persistence, concurrent-request rejection, and an update or interrupted-update recovery. Use controlled test fixtures for failure scenarios. Record commands, Ubuntu version, and outcomes here before marking complete.
+- Update README.md with panel usage, existing-install bootstrap, interruption expectations, and CLI recovery; update AGENTS.md with the narrow launcher boundary.
+
+### Explicit exclusions
+
+No automatic scheduled updates, arbitrary update sources, branch/channel selection, generic terminal, package installation through HTTP, operating-system upgrades, application deployments, release-directory architecture, zero-downtime promises, or automatic database rollback.
+
+### Implementation and verification
+
+- Reused the Bash CLI updater and added one fixed Python bridge, a root-owned systemd oneshot service, exact sudo rules, and a tmpfiles definition for the operations lock. No dependencies, update tables, generic execution endpoints, or second update engine were added.
+- Settings embeds a small Livewire update component. It shows safe version/commit metadata, checks, confirmation, phases, bounded step history, recovery commands, and browser reconnection independent of Livewire snapshot changes during an upgrade. April UI buttons and alert-dialog preserve the existing light/dark design. Impeccable review verified hierarchy, responsive composition, safe Cancel focus, readable warnings, and no overflow; corrected April header slot usage and a disabled-state binding.
+- InfrastructureLock holds a shared file lock throughout current provisioning/repository/domain/database/SSL/deployment operations, including webhook dispatch and queued deployment execution. Nested calls reuse the outer lock. The root updater acquires the exclusive gate and uses the read-only `manager:update-ready` Artisan command as `www-data` to reject pending/running work before stopping services.
+- Status/history is atomic and root-owned outside the application database. HTTP responses discard raw messages, diagnostics, malformed metadata, and arbitrary phases. Service stdout/stderr is suppressed; CLI diagnostics remain available to the root administrator. The common update lock lives in the protected installation state directory rather than a world-writable lock parent. Added bounded Git fetch, signal cleanup, and recovery of vendor ownership for an incomplete update.
+- Existing-server compatibility: the legacy updater copies the new CLI but cannot install integration it did not know about. README therefore documents one initial `sudo laravel-manager update` followed by `sudo laravel-manager enable-panel-updates`; future CLI updates refresh the bridge automatically. New installers include it immediately.
+- Local automated verification: full Pest suite passed (200 tests, 939 assertions); all 11 Python bridge contract tests passed. Pint, Composer validation, shell syntax checks, frontend build, and `git diff --check` passed. Laravel tests fake all process calls; helper contract tests mock network/systemd/updater calls and never update the development host.
+- Documentation: Context7 Laravel 13 process timeouts/argument arrays/fakes and Livewire 4 locked properties/polling. Context7 has no April UI entry; consulted the installed April UI 1.3 Blade component sources. Public systemd documentation fetches failed, so consulted the Ubuntu VM's installed `systemd.service(5)` manual and validated the real unit with `systemd-analyze verify`.
+- VM: `laravel-manager-run11`, Ubuntu 24.04.5 LTS, arm64, `192.168.252.6`. Inspected installation ownership, clean checkout, services, and empty project/job counts first. Preserved the installed Manager database, `.env`, administrator, app directories, and configuration; no reset/reinstall. Transferred unpublished source in `/tmp/laravel-manager-run19.tar.gz`.
+- Real updater smoke test: installed the current root CLI/bridge from transferred files; `sudo laravel-manager update` fast-forwarded the existing installation from `4bf5877` to the already-published `35ba0da`, ran Composer/build/migrations/cache rebuild as `www-data`, restarted services, and verified HTTP 200 on `/login`. No unpublished source was pushed for this test.
+- Isolated UI: dedicated `laravel_manager_run19_ui` MySQL schema, separate administrator, copied vendor with regenerated autoload, and source at `/var/www/laravel-manager-run19-ui`, served by temporary Apache/PHP-FPM virtual host on 8083. Initial temporary artisan-server/Apache port conflict and PrivateTmp access issues were diagnosed and corrected; installed services recovered before verification continued.
+- Real service/browser integration: used a reversible root-owned updater fixture to hold the update/operations locks, stop Apache/PHP-FPM/queue, wait, restore services, and verify login. Chrome DevTools clicked Update now/Confirm update. The service remained activating while both 8080 and 8083 returned connection failures; a duplicate `start` was rejected. Services returned active, login returned HTTP 200, and the browser automatically reloaded Settings with Successful. The fixture and temporary preflight command were removed/restored afterward.
+- Additional VM checks: exact sudo permits `status|check|start` but rejects `run`; a shared operations lock rejected `start` with exit 1; PHP InfrastructureLock returned BLOCKED during queued status and ALLOWED afterward. Installed bridge integration with its fixed root installer and validated sudoers/unit configuration. Simulated an incomplete marker for the installed commit and ran the real CLI: it resumed Composer/build/migrations, removed the marker, restored services, and verified login.
+- Chrome DevTools: desktop 1440×1000 and true mobile emulation 390×844, light/dark presentation, confirmation/cancel focus, loading, success/failure recovery, update check, step history, automatic reconnection, and horizontal overflow checks. Connection errors during the deliberate Apache outage were expected; after reconnection the console had no unexpected warnings/errors.
+- Cleanup: restored the real updater, removed only created OS/source fixtures, disabled the temporary UI vhost, and verified the original installation and services after testing. The isolated test directories/schema remain available for reproduction and do not replace production data.
+
+
+## RUN 20+ — Pending
 
 Do not begin another RUN until explicitly requested.

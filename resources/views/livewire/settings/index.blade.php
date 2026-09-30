@@ -123,4 +123,5 @@
             </div>
         </div>
     </section>
+    <livewire:settings.manager-update />
 </div>

@@ -447,6 +447,7 @@ install_application() {
 install_manager_command() {
     /usr/bin/install -o root -g root -m 0755 \
         "$APP_DIR/scripts/laravel-manager" /usr/local/bin/laravel-manager
+    /bin/bash "$APP_DIR/scripts/install-update-bridge.sh"
 }
 
 install_helpers_and_configuration() {

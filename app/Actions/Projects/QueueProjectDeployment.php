@@ -9,12 +9,18 @@ use App\Jobs\DeployProject;
 use App\Models\Deployment;
 use App\Models\GitHubConnection;
 use App\Models\Project;
+use App\Support\InfrastructureLock;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class QueueProjectDeployment
 {
     public function handle(Project $project): Deployment
+    {
+        return InfrastructureLock::run(fn () => $this->executeHandle($project));
+    }
+
+    private function executeHandle(Project $project): Deployment
     {
         return DB::transaction(function () use ($project): Deployment {
             $project = Project::query()->lockForUpdate()->findOrFail($project->id);

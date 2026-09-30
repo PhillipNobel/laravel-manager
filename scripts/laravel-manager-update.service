@@ -1,0 +1,16 @@
+[Unit]
+Description=Laravel Manager self update
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/local/sbin/laravel-manager-updates run
+TimeoutStartSec=3600
+KillMode=control-group
+TimeoutStopSec=120
+UMask=0027
+StandardOutput=null
+StandardError=null

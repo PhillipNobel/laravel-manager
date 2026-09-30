@@ -23,6 +23,18 @@ VENDOR_WRITABLE=0
 BUILD_BACKUP=0
 BUILD_INSTALLED=0
 
+update_progress() {
+    if [[ -x /usr/local/sbin/laravel-manager-updates ]]; then
+        /usr/local/sbin/laravel-manager-updates progress "$1" >/dev/null || true
+    fi
+}
+
+install_update_bridge() {
+    if [[ -f "$APP_DIR/scripts/install-update-bridge.sh" && ! -L "$APP_DIR/scripts/install-update-bridge.sh" ]]; then
+        /bin/bash "$APP_DIR/scripts/install-update-bridge.sh"
+    fi
+}
+
 fail() {
     printf 'ERROR: %s\n' "$1" >&2
     exit 1
@@ -150,6 +162,9 @@ cleanup() {
             "$QUEUE_SERVICE" || true
     fi
 
+    if [[ "$status" -ne 0 ]]; then
+        update_progress failed
+    fi
     exit "$status"
 }
 
@@ -195,6 +210,9 @@ validate_installation() {
 
     [[ "$(/usr/bin/stat -c '%U:%G:%a' "$APP_DIR")" == 'root:www-data:750' ]] \
         || fail 'The Laravel Manager source directory ownership or permissions changed.'
+    if [[ "$interrupted_update" -eq 1 ]]; then
+        restore_vendor_permissions
+    fi
     [[ "$(/usr/bin/stat -c '%U:%G:%a' "$APP_DIR/.env")" == 'root:www-data:640' ]] \
         || fail 'The production .env ownership or permissions changed.'
     [[ "$(/usr/bin/stat -c '%U:%G:%a' "$APP_DIR/vendor")" == 'root:www-data:750' ]] \
@@ -241,10 +259,27 @@ validate_installation() {
 }
 
 update_manager() {
+    [[ "$EUID" -eq 0 ]] || fail 'Run updates as root: sudo laravel-manager update.'
     local branch current_commit target_commit
-    branch=$(validate_installation)
-    exec 9>/run/lock/laravel-manager-update.lock
+    [[ -d /var/lib/laravel-manager && ! -L /var/lib/laravel-manager \
+        && "$(/usr/bin/stat -c %u /var/lib/laravel-manager)" == 0 \
+        && "$(/usr/bin/stat -c %a /var/lib/laravel-manager)" =~ ^(750|755)$ ]] \
+        || fail 'The update state directory is unsafe.'
+    [[ ! -L /var/lib/laravel-manager/update.lock ]] || fail 'The update lock is unsafe.'
+    exec 9>/var/lib/laravel-manager/update.lock
     /usr/bin/flock -n 9 || fail 'Another Laravel Manager update is already running.'
+    trap cleanup EXIT
+    trap 'exit 1' TERM INT HUP
+    update_progress checking
+    branch=$(validate_installation)
+    if [[ -f /run/lock/laravel-manager-operations.lock && ! -L /run/lock/laravel-manager-operations.lock ]]; then
+        exec 8<>/run/lock/laravel-manager-operations.lock
+        update_progress waiting
+        /usr/bin/flock -w 30 -x 8 || fail 'Application operations are still running. Retry later.'
+        if [[ ! -e "$UPDATE_MARKER" && -f "$APP_DIR/app/Console/Commands/ManagerUpdateReady.php" ]]; then
+            run_artisan manager:update-ready || fail 'Finish queued or running application operations before updating.'
+        fi
+    fi
 
     local interrupted_update=0
     [[ -e "$UPDATE_MARKER" ]] && interrupted_update=1
@@ -264,12 +299,18 @@ update_manager() {
     fi
 
     printf 'Checking GitHub for a Laravel Manager update...\n'
-    run_git fetch --prune --tags origin "$branch"
+    /usr/bin/timeout 120 /usr/bin/env -i PATH=/usr/bin:/bin GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 \
+        /usr/bin/git -c safe.directory="$APP_DIR" -C "$APP_DIR" fetch --prune --tags origin "$branch"
     current_commit=$(run_git rev-parse HEAD)
     target_commit=$(run_git rev-parse FETCH_HEAD)
 
     if [[ "$current_commit" == "$target_commit" && ! -e "$UPDATE_MARKER" ]]; then
         printf 'Laravel Manager is already up to date. '
+        install_update_bridge
+        update_progress verifying
+        /usr/bin/curl --fail --silent --show-error --max-time 10 --output /dev/null http://127.0.0.1:8080/login \
+            || fail 'The local Manager login check failed.'
+        update_progress successful
         version
         return 0
     fi
@@ -289,6 +330,7 @@ update_manager() {
     /usr/bin/chown root:root "$UPDATE_MARKER"
     /bin/chmod 0600 "$UPDATE_MARKER"
     MAINTENANCE_ENABLED=1
+    update_progress maintenance
     run_artisan down --retry=60
 
     SERVICES_STOPPED=1
@@ -298,10 +340,12 @@ update_manager() {
         "$MANAGER_PHP_SERVICE" \
         "${ACTIVE_EXTRA_PHP_SERVICES[@]}"
 
+    update_progress source
     if [[ "$current_commit" != "$target_commit" ]]; then
         run_git merge --ff-only FETCH_HEAD
     fi
 
+    update_progress dependencies
     VENDOR_WRITABLE=1
     /usr/bin/chown -R www-data:www-data -- "$APP_DIR/vendor"
     /usr/bin/find "$APP_DIR/vendor" -type d -exec /bin/chmod 0750 {} +
@@ -310,6 +354,7 @@ update_manager() {
         --no-dev --no-interaction --prefer-dist --optimize-autoloader
     restore_vendor_permissions
 
+    update_progress assets
     UPDATE_TMP=$(/usr/bin/mktemp -d "$CACHE_DIR"/manager-update.XXXXXX)
     /usr/bin/chown root:www-data "$UPDATE_TMP"
     /bin/chmod 0750 "$UPDATE_TMP"
@@ -339,6 +384,7 @@ update_manager() {
     /bin/rm -rf -- "$APP_DIR/public/build.previous"
     BUILD_BACKUP=0
 
+    update_progress migrations
     run_artisan optimize:clear
     run_artisan migrate --force
     run_artisan optimize
@@ -348,8 +394,10 @@ update_manager() {
             "$APP_DIR/scripts/laravel-manager" "$CLI_PATH"
     fi
 
+    install_update_bridge
     run_artisan up
     MAINTENANCE_ENABLED=0
+    update_progress restarting
 
     /usr/bin/systemctl start \
         "$MANAGER_PHP_SERVICE" \
@@ -363,11 +411,13 @@ update_manager() {
         UPDATE_TMP=''
     fi
 
+    update_progress verifying
     /usr/bin/curl --fail --silent --show-error --max-time 10 \
         --output /dev/null http://127.0.0.1:8080/login \
         || fail 'Update finished, but the local Manager login check failed. Review Apache and PHP-FPM logs.'
 
     /bin/rm -f -- "$UPDATE_MARKER"
+    update_progress successful
     printf 'Laravel Manager updated successfully. '
     version
 }
@@ -375,6 +425,7 @@ update_manager() {
 usage() {
     cat <<'USAGE'
 Usage:
+  sudo laravel-manager enable-panel-updates
   sudo laravel-manager version
   sudo laravel-manager update
 
@@ -387,6 +438,11 @@ main() {
     [[ "$#" -eq 1 ]] || { usage >&2; exit 2; }
 
     case "$1" in
+        enable-panel-updates)
+            [[ "$EUID" -eq 0 ]] || fail 'Run this command as root.'
+            validate_installation >/dev/null
+            install_update_bridge
+            ;;
         version)
             version
             ;;

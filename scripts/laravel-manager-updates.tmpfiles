@@ -1,0 +1,1 @@
+f /run/lock/laravel-manager-operations.lock 0660 root www-data -

@@ -7,6 +7,7 @@ use App\Enums\ProjectStatus;
 use App\Models\AppSetting;
 use App\Models\Project;
 use App\Support\DomainGenerator;
+use App\Support\InfrastructureLock;
 use Illuminate\Contracts\Process\ProcessResult;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
@@ -17,10 +18,20 @@ class ConfigureProjectDomain
 {
     public function handle(Project $project): DomainStatus
     {
+        return InfrastructureLock::run(fn () => $this->executeHandle($project));
+    }
+
+    private function executeHandle(Project $project): DomainStatus
+    {
         return $this->run($project, 'enable');
     }
 
     public function refreshStatus(Project $project): DomainStatus
+    {
+        return InfrastructureLock::run(fn () => $this->executeRefreshStatus($project));
+    }
+
+    private function executeRefreshStatus(Project $project): DomainStatus
     {
         return $this->run($project, 'status');
     }

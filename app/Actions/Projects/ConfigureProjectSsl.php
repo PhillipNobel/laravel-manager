@@ -9,6 +9,7 @@ use App\Jobs\EnableProjectSsl;
 use App\Models\AppSetting;
 use App\Models\Project;
 use App\Support\DomainGenerator;
+use App\Support\InfrastructureLock;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Process\ProcessResult;
 use Illuminate\Support\Facades\DB;
@@ -20,6 +21,11 @@ use Throwable;
 class ConfigureProjectSsl
 {
     public function queue(Project $project, string $email): SslStatus
+    {
+        return InfrastructureLock::run(fn () => $this->executeQueue($project, $email));
+    }
+
+    private function executeQueue(Project $project, string $email): SslStatus
     {
         return DB::transaction(function () use ($project, $email): SslStatus {
             $project = Project::query()->lockForUpdate()->findOrFail($project->id);
@@ -65,6 +71,11 @@ class ConfigureProjectSsl
 
     public function enable(Project $project, string $email): SslStatus
     {
+        return InfrastructureLock::run(fn () => $this->executeEnable($project, $email));
+    }
+
+    private function executeEnable(Project $project, string $email): SslStatus
+    {
         $problem = $this->projectProblem($project);
 
         if ($problem !== null || ! $this->validEmail($email)) {
@@ -81,6 +92,11 @@ class ConfigureProjectSsl
     }
 
     public function refreshStatus(Project $project): SslStatus
+    {
+        return InfrastructureLock::run(fn () => $this->executeRefreshStatus($project));
+    }
+
+    private function executeRefreshStatus(Project $project): SslStatus
     {
         if ($project->ssl_status === SslStatus::Provisioning) {
             return SslStatus::Provisioning;

@@ -10,6 +10,7 @@ use App\Models\AppSetting;
 use App\Models\Deployment;
 use App\Models\GitHubConnection;
 use App\Models\Project;
+use App\Support\InfrastructureLock;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -39,6 +40,11 @@ class DeployProject implements ShouldQueue
     public function __construct(public int $deploymentId) {}
 
     public function handle(): void
+    {
+        InfrastructureLock::run(fn () => $this->executeHandle());
+    }
+
+    private function executeHandle(): void
     {
         $deployment = $this->claimDeployment();
 

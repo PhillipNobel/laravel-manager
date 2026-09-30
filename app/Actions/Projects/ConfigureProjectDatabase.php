@@ -7,6 +7,7 @@ use App\Enums\DatabaseStatus;
 use App\Enums\ProjectStatus;
 use App\Models\AppSetting;
 use App\Models\Project;
+use App\Support\InfrastructureLock;
 use App\Support\ProjectDatabaseNames;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -17,6 +18,11 @@ use Throwable;
 class ConfigureProjectDatabase
 {
     public function handle(Project $project): DatabaseStatus
+    {
+        return InfrastructureLock::run(fn () => $this->executeHandle($project));
+    }
+
+    private function executeHandle(Project $project): DatabaseStatus
     {
         if ($project->database_status === DatabaseStatus::Active) {
             return DatabaseStatus::Active;

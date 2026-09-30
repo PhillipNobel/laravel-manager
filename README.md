@@ -4,7 +4,7 @@ Laravel Manager is a self-hosted web application for managing Laravel applicatio
 
 ## Project status
 
-RUN 01 through RUN 18 are complete. A first-run setup guides the administrator through server defaults, read-only environment checks, optional GitHub connection, and manual wildcard DNS confirmation before opening Apps. Settings hold this server's identity, Laravel app defaults, and GitHub connection. The protected Server page shows local environment details and read-only software and service checks. Create App lets the administrator choose PHP 8.2, 8.3, or 8.4 and MySQL or PostgreSQL for each app. Protected Project actions configure its PHP-FPM virtual host, create and verify a dedicated database, deploy manually or after a matching GitHub push, and enable HTTPS with Let's Encrypt. The authenticated header offers System, Light, and Dark themes; an explicit choice is saved in the current browser.
+RUN 01 through RUN 19 are complete. A first-run setup guides the administrator through server defaults, read-only environment checks, optional GitHub connection, and manual wildcard DNS confirmation before opening Apps. Settings hold this server's identity, Laravel app defaults, and GitHub connection. The protected Server page shows local environment details and read-only software and service checks. Create App lets the administrator choose PHP 8.2, 8.3, or 8.4 and MySQL or PostgreSQL for each app. Protected Project actions configure its PHP-FPM virtual host, create and verify a dedicated database, deploy manually or after a matching GitHub push, and enable HTTPS with Let's Encrypt. The authenticated header offers System, Light, and Dark themes; an explicit choice is saved in the current browser.
 
 Laravel Manager itself stays on PHP 8.3 and uses MySQL in production. The server installer installs the supported app PHP-FPM runtimes and database services up front. Create App shows unavailable choices as disabled with the missing requirement; it never installs server packages from a web request.
 
@@ -148,6 +148,25 @@ sudo laravel-manager update
 ```
 
 The updater refuses local source changes and non-fast-forward updates. It briefly places the Manager in maintenance mode and stops Apache, active PHP-FPM services, and the queue while it updates Composer dependencies, builds frontend assets, runs migrations, rebuilds Laravel caches, and restarts services. Composer, npm, Artisan, and migrations run as `www-data`; the updater itself is root-owned. It checks the local login page when services return. Do not interrupt an update. If it fails, review the command output and Laravel/Apache logs, resolve the reported issue, and rerun the same update command. Database migrations are not rolled back automatically.
+
+### Update from the panel
+
+Open **Settings → Manager updates → Check for updates**. Review the installed version and available commit, select **Update now**, and confirm the brief interruption. The panel and managed sites can become unavailable while shared Apache/PHP-FPM services restart. The browser reconnects automatically and displays the result and a bounded list of update steps. Close or refresh the browser without stopping the independent systemd update service.
+
+An update is refused while app provisioning, database/certificate setup, or deployments are queued/running. Finish those operations first. CLI and panel updates share one lock, and new infrastructure work is blocked once an update starts. The update follows the installed origin/branch and checks GitHub again at execution time; the available commit can advance between checking and confirming.
+
+New installations include the panel update service. Servers installed before RUN 19 need this one-time bootstrap, performed when no application operation is running:
+
+```bash
+sudo laravel-manager update
+sudo laravel-manager enable-panel-updates
+```
+
+The first command updates the source and CLI. The second installs the root-owned bridge, independent systemd unit, temporary lock configuration, and exact sudo rules. Later updates refresh those files automatically. If the updater command itself is missing, use the download bootstrap above first. Do not reinstall the Manager or recreate its database.
+
+Local development and installations without the bridge show panel updates disabled. If a check fails, try again later. If an update fails, inspect the server and run `sudo laravel-manager update` to diagnose/resume; the CLI remains available even when the panel cannot boot. An interrupted update keeps a root-owned recovery marker. Migrations have no automatic rollback: keep a current database backup before updating a production server.
+
+Update status is stored outside the checkout/database in root-owned `/var/lib/laravel-manager/updates/status.json`. The panel exposes only fixed phases, safe commit identifiers, timestamps, and bounded step history. Raw Composer/Git/environment diagnostics are not exposed by HTTP. The service has no dependency on Apache or the Manager queue; `www-data` can invoke only the exact bridge `status`, `check`, and `start` operations, never its internal `run` or `progress` actions or the general root updater. This remains a trusted-repository server: all apps share `www-data`; the bridge does not provide per-project isolation.
 
 Run each project RUN's server behavior checks on the existing disposable Ubuntu 24.04 Multipass VM `laravel-manager-run11`. Inspect its current state first; do not reset or reinstall it without explicit authorization. Record the VM commands and results in `RUNS.md`.
 
@@ -365,4 +384,4 @@ RUN 08 does not create repository webhooks through the GitHub API. RUN 10 adds a
 
 ## Roadmap
 
-See [RUNS.md](RUNS.md). RUN 01 through RUN 18 are complete. Do not begin another RUN until explicitly requested.
+See [RUNS.md](RUNS.md). RUN 01 through RUN 19 are complete. Do not begin another RUN until explicitly requested.
