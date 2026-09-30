@@ -6,6 +6,8 @@ use Illuminate\Database\Eloquent\Model;
 
 class AppSetting extends Model
 {
+    protected $hidden = ['value'];
+
     protected $fillable = ['key', 'value'];
 
     public static function valueFor(string $key): string

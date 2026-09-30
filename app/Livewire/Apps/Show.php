@@ -5,6 +5,7 @@ namespace App\Livewire\Apps;
 use App\Actions\Projects\ConfigureProjectDatabase;
 use App\Actions\Projects\ConfigureProjectDomain;
 use App\Actions\Projects\ConfigureProjectSsl;
+use App\Actions\Projects\ConfigureProjectWebhook;
 use App\Actions\Projects\QueueProjectDeployment;
 use App\Enums\DatabaseStatus;
 use App\Enums\DeploymentStatus;
@@ -13,6 +14,7 @@ use App\Enums\ProjectStatus;
 use App\Enums\SslStatus;
 use App\Models\GitHubConnection;
 use App\Models\Project;
+use App\Support\LocalDevelopmentGuide;
 use Illuminate\View\View;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Locked;
@@ -68,6 +70,12 @@ class Show extends Component
         session()->flash('status', 'Deployment queued.');
     }
 
+    public function configureWebhook(ConfigureProjectWebhook $action): void
+    {
+        $action->handle($this->project);
+        $this->project->refresh();
+    }
+
     public function render(): View
     {
         $this->project->refresh();
@@ -80,6 +88,7 @@ class Show extends Component
         ));
 
         return view('livewire.apps.show', [
+            'localCommands' => LocalDevelopmentGuide::commands($this->project),
             'canConfigureDomain' => $this->project->status === ProjectStatus::Active && filled($this->project->path),
             'domainStatus' => $this->project->domain_status ?? DomainStatus::Pending,
             'sslStatus' => $this->project->ssl_status ?? SslStatus::Pending,

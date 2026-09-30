@@ -1,6 +1,6 @@
 # Laravel Manager RUN Roadmap
 
-RUNs are strictly sequential. Implement only the RUN explicitly requested. RUN 01 through RUN 19 are complete. RUN 20+ are pending.
+RUNs are strictly sequential. Implement only the RUN explicitly requested. RUN 01 through RUN 20 are complete. RUN 21+ are pending.
 
 ## Required verification for every RUN
 
@@ -633,6 +633,94 @@ No automatic scheduled updates, arbitrary update sources, branch/channel selecti
 - Cleanup: restored the real updater, removed only created OS/source fixtures, disabled the temporary UI vhost, and verified the original installation and services after testing. The isolated test directories/schema remain available for reproduction and do not replace production data.
 
 
-## RUN 20+ — Pending
+## RUN 20 — Local Development Guide and Automatic Webhook Setup — Complete
+
+### Objective
+
+After creating an app, show the administrator how to start developing locally and configure its GitHub push webhook automatically. Reuse the existing provisioning and deployment engine. Implemented through the existing Project page, GitHub API, webhook receiver and deployment queue.
+
+### Desired flow
+
+```text
+Create App → Private GitHub repository → Provisioned app
+    → Manager configures the push webhook
+    → Project page shows local setup and remaining server requirements
+    → Copy commands → Clone locally → Develop → Push configured branch
+    → Signed webhook → Existing deployment queue → Deployment result
+```
+
+### Scope — local development instructions
+
+- Add a compact Develop locally section to the Project detail page, shown when canonical GitHub repository metadata is available. Keep server operations and local instructions clearly labelled.
+- Display the selected PHP version, required local Git/Composer/Node.js/npm tools, and SQLite/PDO requirements. PHP 8.2 starters use Laravel 12; PHP 8.3/8.4 starters use Laravel 13. Do not imply that the Manager installs software on the developer's computer.
+- Generate a safe HTTPS clone command for the configured repository and branch, with the Project slug as the local directory name. Use proper shell quoting; never use the free-form application name as shell input or embed Manager credentials.
+- Provide ordered, copyable commands for clone, entering the directory, Composer dependencies, copying `.env.example`, generating a local APP_KEY, preparing a SQLite database, running migrations, and frontend dependencies.
+- Include a small local `.env` guide for SQLite. Explain which database variables must be cleared/changed so the app does not use VPS MySQL/PostgreSQL credentials. Verify the exact recipe against both supported official starter versions during implementation.
+- Show the Laravel server and Vite commands as separate terminal sessions, followed by the configured-branch commit/push workflow. Do not put a blocking dev server in the middle of a single setup command block.
+- Make copy actions accessible and show copied/failure feedback. If Clipboard API is unavailable, leave selectable commands and a useful manual-copy instruction.
+- Distinguish first-time setup from daily work. Preserve the local `.env`, database, and key after initial setup; explain that `.env` must remain untracked.
+- For an existing/custom repository, label the commands as a Laravel baseline and link to its README. Do not claim that arbitrary repositories need no additional services, extensions, configuration, or project-specific setup. Do not execute repository code to discover its requirements.
+
+### Scope — GitHub webhook configuration
+
+- Extend the existing GitHubApi and add one meaningful ConfigureProjectWebhook action; do not introduce a second GitHub authentication method or a generic integration layer.
+- After successful app provisioning, attempt to configure a repository webhook using the connected account. Support both newly created and selected existing repositories when the account can administer their webhooks.
+- Derive the endpoint from the configured Manager URL plus the existing `/webhooks/github` route. Require a public HTTPS hostname with certificate verification enabled; reject credential-bearing URLs, local/private addresses, unexpected paths, query strings, fragments, and HTTP. Show the missing HTTPS requirement on local/VM installations rather than claiming automatic deployment is ready.
+- Use the fixed GitHub REST repository-hook operations: list hooks, create `name=web`, `active=true`, `events=[push]`, `content_type=json`, a secret, and `insecure_ssl=0`. Use bounded HTTP calls, validated repository identifiers, and bounded pagination before deciding no matching hook exists.
+- Verify actual repository administration access and the current OAuth permission requirements. The existing connection requests `repo`; consult current GitHub documentation before requesting any additional scope. A connected account alone does not prove webhook administration rights.
+- Reuse a compatible hook for the exact Manager endpoint without creating duplicates. Serialize configuration per repository, including when several Projects use the same repository with different branches. Reconcile an ambiguous API timeout by listing hooks before retrying creation.
+- Preserve unrelated hooks. Do not silently replace an existing hook's unrelated events or adopt a conflicting configuration. Show a clear conflict/recovery message when a compatible hook cannot be safely reused.
+- Repair only a recorded Manager-owned hook after validating repository ownership and its identity, including a changed Manager URL. Never modify a hook based only on a browser-supplied ID.
+- Keep a Manager-wide signing secret so one hook can serve several Projects of the same repository. Reuse the existing `GITHUB_WEBHOOK_SECRET` when configured. When absent, generate a persistent cryptographically random secret in an isolated encrypted settings entry; resolve it through one small explicit accessor shared by provisioning and signature validation. Do not write `.env` from HTTP, add sudo permissions, tie the secret to an OAuth connection that may be disconnected, or rotate it on each retry.
+- Store only required hook ID, configuration status, safe error summary, and check/verification timestamps on Project or the smallest appropriate existing persistence structure. Never store a signing secret on Project or return it in Livewire state, JSON serialization, commands, UI, or logs.
+- Request a hook ping and record verification only after receiving the correctly signed ping for the configured repository/hook. An accepted API ping request is not proof that GitHub reached the Manager. A ping must never enqueue a deployment.
+- Preserve existing manually configured webhook behavior and signature verification. Continue exact repository/branch matching, signed-body deduplication, deleted-branch rejection, readiness checks, and the existing deployment concurrency guard.
+
+### Scope — Project readiness and recovery
+
+- Add a concise Automatic deployment section showing configured branch, hook configuration, delivery verification, and missing requirements. Use explicit states such as not configured, configuring, configured/unverified, verified, and failed.
+- If webhook setup fails, keep the created repository and provisioned app intact. Report the integration failure separately from Project provisioning status; offer Configure/Retry webhook and Check connection on the existing Project page.
+- Existing Projects can configure the hook through the same action. Do not automatically rewrite every existing repository during a migration, page render, or Manager update.
+- Show remaining server steps using the existing Apache, database, HTTPS, and Deploy now actions. Keep queue/server readiness visible. Creating an app must not be presented as proof that its database, public domain, first deploy, or HTTPS is already ready.
+- Explain that automatic deployment starts only after existing deployment prerequisites are satisfied and the configured branch is pushed. Other branches are ignored. The first Deploy now remains available for verifying the initial server setup; no new provisioning pipeline or deployment implementation is required here.
+- Respect RUN 19 InfrastructureLock for webhook configuration and retries. Preserve webhook handling during updates under the existing readiness/concurrency rules; do not add an arbitrary command endpoint.
+
+### Acceptance criteria
+
+- A newly created official Laravel app displays accurate, selectable/copyable local setup instructions with no secrets, for each supported PHP/starter combination.
+- Clone URL, branch, and directory derive only from validated Project metadata. Invalid/malicious identifiers cannot inject shell syntax into generated commands.
+- The documented setup works with SQLite for official Laravel 12 and 13 starters and does not need VPS database credentials. First-time and daily commands are clearly separated; custom repositories display their README-specific caveat.
+- Webhook creation uses only the intended repository, exact callback, push event, active state, JSON content, TLS verification, and persistent secret. Retries, concurrent requests, shared repositories, and ambiguous creation failures do not duplicate hooks.
+- Unrelated hooks remain unchanged. Insufficient access, missing GitHub connection, HTTP/private Manager URL, conflict, API errors/rate limiting, and missing prerequisites show useful English messages and a safe retry path.
+- A webhook failure does not delete or mark a successfully provisioned app failed. Existing Projects can opt into configuration without recreating them.
+- Legacy `.env` signing secrets and manual hooks keep working. Generated fallback secrets are encrypted, retained across reconnects/retries/Manager updates, hidden from serialization, and excluded from output.
+- Configured and verified states remain distinct. Valid signed ping records verification without a deployment; invalid/mismatched pings do not verify a Project. Only valid signed pushes for the exact configured branch enqueue the existing deployment action.
+- Pest covers command generation/quoting, visibility, copying markup/feedback, hook creation/reuse/conflicts, timeout reconciliation, authorization, secret persistence/compatibility, ping verification, push filtering, readiness, and Manager update blocking. Fake all GitHub HTTP and operating-system processes in Laravel tests.
+- Run the complete Pest suite, helper tests where affected, formatting checks, frontend build, and `git diff --check` successfully.
+- Consult Context7 for GitHub/Laravel/Livewire behavior during implementation. Apply Caveman to reuse existing actions, signature validation, and deployment code; use April UI and Impeccable for compact command blocks, readiness states, accessibility, and recovery feedback.
+- Inspect and verify on the existing Ubuntu 24.04 Multipass VM `laravel-manager-run11` without resetting it or overwriting its data. Transfer unpublished source to an isolated app/database. Exercise signed ping/push requests, queue behavior, and the local setup recipe against disposable official starter copies. Keep deployment process tests controlled so verification cannot modify a real managed app.
+- Verify Chrome DevTools desktop/mobile and light/dark layouts: Create App → Project, copy actions and clipboard fallback, webhook loading/error/retry, readiness, and deployment history. Confirm no unwanted horizontal overflow or unexpected console errors.
+- A real public GitHub delivery smoke test may use an explicitly authorized disposable repository and available test credentials; never create/delete unrelated resources or claim public delivery succeeded from a simulated/local request. Document actual verification evidence and any unavailable external check separately.
+- Update README.md, AGENTS.md, and this RUN with implementation boundaries, commands, outcomes, VM details, and the remaining server requirements before marking complete.
+
+### Explicit exclusions
+
+No installation on the developer's computer, Docker, local VPS database credentials, arbitrary repository script inspection/execution, GitHub App migration, new deployment engine, automatic Apache/database/SSL provisioning pipeline, automatic first deployment, hook deletion, disabling TLS verification, automatic secret rotation, or speculative multi-server features.
+
+### Implementation and verification
+
+- Added LocalDevelopmentGuide, ConfigureProjectWebhook and WebhookSecret; extended the existing GitHubApi and signed receiver. One migration adds hook ID/URL, status, safe summary and timestamps; no secret belongs to Project. AppSetting values are hidden from serialization.
+- The existing Create App attempts configuration only after successful provisioning. Integration errors retain the app. The Project page offers configuration/retry, verified delivery status, remaining server steps and six expandable local command blocks with copy feedback/manual selection fallback and a repository README link.
+- Reused Laravel cache atomic locks and InfrastructureLock, existing OAuth repo scope, existing queue/readiness checks and deployment history. No new package, authentication method, root helper or deployment engine. Context7 consulted GitHub repository hooks, Laravel cache locks and Alpine async/event handling; April UI supplies buttons/badges and incumbent theme tokens.
+- Local complete Pest suite: **223 passed, 1,012 assertions**. Python update bridge suite: **11 passed**. Pint, Composer validate --strict, frontend Vite build and git diff --check passed. Corrected one old Settings test to use configured PHP defaults instead of a developer-specific 8.4 expectation.
+- VM: **laravel-manager-run11**, Ubuntu **24.04.5 LTS arm64**, **192.168.252.6**, PHP **8.3.6**. Inspected Apache/MySQL/PHP-FPM/queue and root-owned installed source/environment first. Preserved installed /opt/laravel-manager and its database, configuration and services. Added php8.3-sqlite3 as a VM test prerequisite; installed application dependencies as www-data from composer.lock in the isolated source, because copied local vendor packages included incompatible PHP 8.4 dependencies.
+- Transferred unpublished archives with multipass transfer into **/var/www/laravel-manager-run20-ui** with a separate .env/APP_KEY/SQLite database and temporary Apache **8083** site. Ran `sudo -u www-data php8.3 artisan migrate --force` and `php8.3 vendor/bin/pest --compact`; complete VM suite passed. No production seeder/database migration was run.
+- Disposable official **Laravel 12 and 13** starters were created under /var/www/laravel-manager-run20-starter-{12,13}. Composer install, copying .env.example, local SQLite configuration, key generation, database creation/migrations, npm install/build and git check-ignore .env succeeded on PHP 8.3. No PHP 8.2/8.4 CLI is installed in this VM; selected version labels and starter mapping remain covered by local fake-process tests. Laravel 13 starter emitted an optional fontaine optimization warning; the frontend build succeeded.
+- Real HTTP requests to the isolated Apache endpoint: signed ping **202/verified/0 deployments**; matching signed push **202/queued/1 deployment**, persisted to its separate database queue. Executed that existing deployment job with every Process/HTTP call faked against isolated files: **successful**. No real repository/app deployment or live OAuth credential was used.
+- Chrome DevTools against VM: authenticated Apps→Project, hook requirement/error/retry, signed verification/readiness and deployment history, expandable command blocks, successful copy with a browser clipboard test double and actual manual-selection fallback under HTTP. Desktop **1440×1000**, mobile **390×844**, light/dark; no document horizontal overflow. Fixed an Alpine async expression error discovered by clicking Copy; final console had no unexpected errors. Impeccable review retained restrained hierarchy, compact expandable commands, visible recovery and accessible live feedback.
+- Public GitHub delivery was **not** exercised: no authorized disposable public repository/test credential was available. A simulated signed ping is documented as local receiver evidence only; the administrator confirms public delivery through Project verification and GitHub Recent deliveries on a reachable HTTPS VPS.
+- Temporary UI site disabled after verification; installed login/service health confirmed. RUN 21+ remains pending.
+
+## RUN 21+ — Pending
 
 Do not begin another RUN until explicitly requested.

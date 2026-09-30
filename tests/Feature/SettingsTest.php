@@ -22,7 +22,7 @@ it('shows the configured server settings and disconnected GitHub state', functio
         ->assertSet('publicIp', '')
         ->assertSet('baseDomain', 'apps.example.com')
         ->assertSet('applicationsDirectory', '/var/www/apps')
-        ->assertSet('defaultPhpVersion', '8.4')
+        ->assertSet('defaultPhpVersion', config('manager.default_php_version'))
         ->assertSet('managerUrl', config('app.url'));
 });
 

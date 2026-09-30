@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Actions\GitHub\ProcessGitHubWebhook;
+use App\Support\WebhookSecret;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use JsonException;
@@ -13,7 +14,11 @@ class GitHubWebhookController extends Controller
 
     public function __invoke(Request $request, ProcessGitHubWebhook $processWebhook): JsonResponse
     {
-        $secret = config('services.github.webhook_secret');
+        try {
+            $secret = WebhookSecret::read();
+        } catch (\Throwable) {
+            $secret = null;
+        }
 
         if (! is_string($secret) || $secret === '') {
             return response()->json(['message' => 'GitHub webhook secret is not configured.'], 503);

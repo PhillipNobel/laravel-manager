@@ -207,3 +207,10 @@ A live domain preview sits in a soft-gray, blue-gray-bordered field with monospa
 - **Don't** turn the control room into a decorative marketing surface.
 - **Don't** add prominent shadows to ordinary cards or detail sections.
 - **Don't** use monospace for ordinary interface prose or labels.
+
+
+### Project development guide — RUN 20
+
+Automatic deployment uses a divided detail section with a compact status badge, saved branch, delivery evidence and one configuration/retry action. Keep configuration acceptance separate from signed delivery verification and show remaining server requirements alongside it.
+
+Develop locally uses native expandable steps, monospace command blocks with horizontal scrolling contained inside the block, April UI copy buttons and accessible live feedback. Keep the local environment checkpoint between dependency installation and initialization. Label separate Laravel/Vite terminals and the daily workflow explicitly; keep the custom repository README link visible. Retain light/dark theme tokens and avoid decorative cards or a second component library. Chrome review covered desktop/mobile, both themes, manual copy fallback and a clipboard test double; the discovered Alpine async expression issue was corrected before completion.

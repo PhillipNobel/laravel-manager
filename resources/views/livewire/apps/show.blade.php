@@ -21,6 +21,8 @@
         </div>
     </div>
 
+    @include('livewire.apps.development-guide')
+
     <section aria-labelledby="domain-heading">
         <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>

@@ -136,6 +136,41 @@ class GitHubApi
             ->throw();
     }
 
+    public function repository(string $token, string $repository): array
+    {
+        return $this->api($token)->get("/repos/{$repository}")->throw()->json();
+    }
+
+    public function hooks(string $token, string $repository): array
+    {
+        $hooks = [];
+        for ($page = 1; $page <= 3; $page++) {
+            $batch = $this->api($token)->get("/repos/{$repository}/hooks", ['per_page' => 100, 'page' => $page])->throw()->json();
+            if (! is_array($batch) || ! array_is_list($batch)) {
+                throw new RuntimeException('Invalid webhook response.');
+            }
+            $hooks = array_merge($hooks, $batch);
+            if (count($batch) < 100) {
+                return $hooks;
+            }
+        }
+        throw new RuntimeException('Webhook listing limit reached.');
+    }
+
+    public function saveHook(string $token, string $repository, array $payload, ?int $id): array
+    {
+        $request = $this->api($token);
+
+        return ($id
+            ? $request->patch("/repos/{$repository}/hooks/{$id}", $payload)
+            : $request->post("/repos/{$repository}/hooks", $payload))->throw()->json();
+    }
+
+    public function pingHook(string $token, string $repository, int $id): void
+    {
+        $this->api($token)->post("/repos/{$repository}/hooks/{$id}/pings")->throw();
+    }
+
     private function api(string $accessToken): PendingRequest
     {
         return Http::baseUrl(self::API_URL)

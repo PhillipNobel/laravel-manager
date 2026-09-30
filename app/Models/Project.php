@@ -13,6 +13,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Project extends Model
 {
     protected $fillable = [
+        'webhook_id', 'webhook_url', 'webhook_status', 'webhook_message',
+        'webhook_checked_at', 'webhook_verified_at',
         'name',
         'slug',
         'domain',
@@ -38,6 +40,9 @@ class Project extends Model
     protected function casts(): array
     {
         return [
+            'webhook_id' => 'integer',
+            'webhook_checked_at' => 'datetime',
+            'webhook_verified_at' => 'datetime',
             'status' => ProjectStatus::class,
             'domain_status' => DomainStatus::class,
             'ssl_status' => SslStatus::class,

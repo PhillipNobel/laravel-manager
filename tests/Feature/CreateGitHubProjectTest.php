@@ -17,6 +17,7 @@ use Illuminate\Support\Str;
 use Livewire\Livewire;
 
 beforeEach(function () {
+    config(['manager.manager_url' => 'http://localhost']);
     $this->actingAs(User::factory()->create());
     $this->applicationsRoot = storage_path('framework/testing/new-apps-'.Str::uuid());
     $this->githubToken = 'gho_new_repository_test_token';
@@ -126,7 +127,9 @@ it('creates a private Laravel repository from Create App and provisions its main
 
     $form->assertRedirect(route('apps.show', $project));
 
-    expect($project->status)->toBe(ProjectStatus::Active)
+    expect($project->webhook_status)->toBe('failed')
+        ->and($project->webhook_message)->toContain('public HTTPS')
+        ->and($project->status)->toBe(ProjectStatus::Active)
         ->and($project->repository_name)->toBe('octocat/client-portal')
         ->and($project->repository_url)->toBe('https://github.com/octocat/client-portal')
         ->and($project->branch)->toBe('main')

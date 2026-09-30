@@ -4,7 +4,7 @@ Laravel Manager is a self-hosted web application for managing Laravel applicatio
 
 ## Project status
 
-RUN 01 through RUN 19 are complete. A first-run setup guides the administrator through server defaults, read-only environment checks, optional GitHub connection, and manual wildcard DNS confirmation before opening Apps. Settings hold this server's identity, Laravel app defaults, and GitHub connection. The protected Server page shows local environment details and read-only software and service checks. Create App lets the administrator choose PHP 8.2, 8.3, or 8.4 and MySQL or PostgreSQL for each app. Protected Project actions configure its PHP-FPM virtual host, create and verify a dedicated database, deploy manually or after a matching GitHub push, and enable HTTPS with Let's Encrypt. The authenticated header offers System, Light, and Dark themes; an explicit choice is saved in the current browser.
+RUN 01 through RUN 20 are complete. A first-run setup guides the administrator through server defaults, read-only environment checks, optional GitHub connection, and manual wildcard DNS confirmation before opening Apps. Settings hold this server's identity, Laravel app defaults, and GitHub connection. The protected Server page shows local environment details and read-only software and service checks. Create App lets the administrator choose PHP 8.2, 8.3, or 8.4 and MySQL or PostgreSQL for each app. Protected Project actions configure its PHP-FPM virtual host, create and verify a dedicated database, deploy manually or after a matching GitHub push, and enable HTTPS with Let's Encrypt. The authenticated header offers System, Light, and Dark themes; an explicit choice is saved in the current browser.
 
 Laravel Manager itself stays on PHP 8.3 and uses MySQL in production. The server installer installs the supported app PHP-FPM runtimes and database services up front. Create App shows unavailable choices as disabled with the missing requirement; it never installs server packages from a web request.
 
@@ -269,7 +269,7 @@ Use the same URL and callback in the OAuth App and `.env`, including `https://`,
 
 The authorization asks for the `repo` scope so the manager can list private repositories as well as public repositories. GitHub's OAuth `repo` scope grants broad access to private repositories for that account; review the [scope description](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps) and consider a dedicated GitHub account that can access only the repositories it should manage. Laravel Manager stores the OAuth token encrypted using `APP_KEY` and never displays it. Keep `APP_KEY` stable while a GitHub connection is stored; changing it requires reconnecting GitHub.
 
-Settings lists up to 100 repositories sorted by recent activity, with visibility and default branch. **Disconnect** revokes the OAuth token at GitHub before deleting the local connection. The administrator configures repository webhooks in GitHub; Laravel Manager does not create them through the GitHub API.
+Settings lists up to 100 repositories sorted by recent activity, with visibility and default branch. **Disconnect** revokes the OAuth token at GitHub before deleting the local connection. After provisioning an app, Laravel Manager attempts to configure a push webhook using this connection. The account must have repository administrator access. Existing apps can use Configure webhook on their Project page.
 
 ## Creating an application
 
@@ -364,6 +364,10 @@ Use **Deploy now** to retry a failed deployment; it fetches the latest configure
 
 ## Automatic GitHub deployments
 
+Use **Project → Configure webhook** for automatic configuration; see the setup section below for requirements and verification.
+
+### Manual hook setup (optional)
+
 Set a dedicated webhook secret in the Laravel Manager server environment. Generate one with `openssl rand -hex 32`, then run `php artisan config:clear` after changing it:
 
 ```dotenv
@@ -380,8 +384,24 @@ Laravel Manager checks `X-Hub-Signature-256` against the exact raw request body.
 
 Signed delivery records contain the GitHub delivery ID, body fingerprint, event, repository, branch ref, outcome, and number of deployments queued. The request body and signature are not stored. Invalid signatures are rejected without creating a delivery record.
 
-RUN 08 does not create repository webhooks through the GitHub API. RUN 10 adds a post-deployment health check for active Apache domains. Retry remains a manual **Deploy now** action; automatic retries and rollback are not enabled.
+RUN 20 configures repository webhooks through the GitHub API; the manual setup above remains available for installations with an explicitly configured signing secret. RUN 10 adds a post-deployment health check for active Apache domains. Retry remains a manual **Deploy now** action; automatic retries and rollback are not enabled.
+
+### Automatic webhook setup and local development
+
+Set **Settings → Manager URL** to your public HTTPS origin, for example `https://manager.philcode.dev.br` (no path or port). The certificate must be valid, port 443 reachable, and the connected GitHub account must have administrator access to the repository. The existing OAuth `repo` scope is reused; no second integration is required.
+
+Create App attempts to configure the hook after successful provisioning. Existing apps use **Configure webhook** on their detail page. Manager configures an active push-only JSON hook with TLS verification. A compatible hook is reused; conflicting or unrelated hooks are preserved. **Check connection / retry** rechecks configuration and requests another ping. Webhook failure preserves the repository and provisioned app.
+
+**Configured** means GitHub accepted the configuration. **Verified** means a correctly signed ping for that repository and hook reached Manager. A ping never deploys. If verification is pending, check the public Manager URL, DNS, valid certificate, subnet/host firewall port 443, and GitHub → Repository → Settings → Webhooks → Recent deliveries. A locally simulated ping is not evidence of public GitHub delivery.
+
+An existing `GITHUB_WEBHOOK_SECRET` remains authoritative. If it is absent, Manager generates one persistent secret encrypted in `app_settings`, independent of the OAuth connection. Keep the Manager database and APP_KEY in backups. No secret appears in the UI or clone commands. Do not change the configured secret without updating existing hooks; retry reuses the current secret. For automatic setup, you do not need to generate or paste a secret manually.
+
+The Project page's **Develop locally** section provides selectable/copyable instructions: clone the saved branch, install Composer/npm dependencies, prepare a local `.env`, initialize SQLite, and start Laravel and Vite in separate terminals. Use PHP matching the app (8.2 starters use Laravel 12; 8.3/8.4 starters use Laravel 13), Git, Composer, Node/npm and PDO SQLite on your computer. Customized repositories may need additional setup described in their linked README.
+
+For local SQLite, set `APP_ENV=local`, `APP_DEBUG=true`, `APP_URL=http://localhost:8000`, `DB_CONNECTION=sqlite`, and `QUEUE_CONNECTION=sync`. Remove `DB_URL`, `DB_DATABASE`, `DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_PASSWORD`, and `DB_SOCKET` to use Laravel's default `database/database.sqlite`. Copy `.env.example` only when `.env` does not already exist; never copy server credentials. Generate the key, create the SQLite file and run migrations once during initial setup. Confirm `.env` is ignored by Git. On later days, start Laravel/Vite, develop, commit and push the configured branch.
+
+Before relying on pushes, finish the application's database, Apache domain, HTTPS and initial **Deploy now** steps using the existing controls. Keep the server queue worker running. Only matching signed branch pushes queue deployments; inspect deployment history for success or failure. Webhook configuration does not provision these requirements automatically.
 
 ## Roadmap
 
-See [RUNS.md](RUNS.md). RUN 01 through RUN 19 are complete. Do not begin another RUN until explicitly requested.
+See [RUNS.md](RUNS.md). RUN 01 through RUN 20 are complete. Do not begin another RUN until explicitly requested.

@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Apps;
 
+use App\Actions\Projects\ConfigureProjectWebhook;
 use App\Actions\Projects\CreateProjectRepository;
 use App\Actions\Projects\ProvisionProject;
 use App\Enums\DatabaseEngine;
@@ -259,6 +260,10 @@ class Create extends Component
         }
 
         $provisionProject->handle($project, $repository, $connection);
+
+        if ($project->fresh()->status === ProjectStatus::Active) {
+            app(ConfigureProjectWebhook::class)->handle($project);
+        }
 
         $this->redirect(route('apps.show', $project));
     }

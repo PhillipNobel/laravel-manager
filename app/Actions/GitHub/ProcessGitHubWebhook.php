@@ -30,6 +30,28 @@ class ProcessGitHubWebhook
 
             $delivery = GitHubWebhookDelivery::query()->where('delivery_id', $deliveryId)->firstOrFail();
 
+            if ($event === 'ping') {
+                $id = data_get($payload, 'hook.id');
+                $url = data_get($payload, 'hook.config.url');
+                $repo = data_get($payload, 'repository.full_name');
+                if (is_int($id) && $id > 0 && is_string($url) && is_string($repo)
+                    && data_get($payload, 'hook_id') === $id) {
+                    $count = Project::query()->where('repository_name', $repo)->where('webhook_id', $id)
+                        ->where('webhook_url', $url)->update([
+                            'webhook_status' => 'verified', 'webhook_verified_at' => now(),
+                            'webhook_message' => 'Signed GitHub delivery verified.',
+                        ]);
+                    if ($count > 0) {
+                        $delivery->update(['status' => 'verified', 'repository_name' => $repo,
+                            'message' => 'Signed webhook ping verified.']);
+
+                        return ['status' => 'verified', 'deployments_queued' => 0];
+                    }
+                }
+
+                return $this->ignore($delivery, 'Ping does not match a configured repository webhook.');
+            }
+
             if ($event !== 'push') {
                 return $this->ignore($delivery, 'Only push events are used for deployment.');
             }

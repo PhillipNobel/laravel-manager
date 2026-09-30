@@ -21,3 +21,8 @@ Feature tests cover Create App with either an existing repository or a newly cre
 ## RUN 18 theme and Manager reverse proxy
 
 Theme tests cover the authenticated header's System/Light/Dark choices and the early preference bootstrap. Forwarded HTTPS tests use a temporary route and fixed server variables: trust `X-Forwarded-Proto` only when `REMOTE_ADDR` is the loopback Apache proxy, and ignore it from a remote client. Do not contact a public Manager URL, change firewall rules, or request a certificate in tests.
+
+
+## RUN 20 local guide and webhook setup
+
+Test canonical command generation, safe shell quoting, local SQLite guidance and copy fallback markup; browser checks cover copy feedback and Clipboard API fallback. Fake all GitHub calls, bounded hook listing, creation/update/ping, administration checks, conflicts, lost responses and rate limits. Keep signing secrets encrypted/hidden and independent of GitHubConnection. Signed receiver tests cover matching/mismatched pings without deployment and reuse the existing push suite for branch/readiness/deduplication. No test may create a public GitHub resource, use live credentials or run real deployment processes. Settings tests must derive configured defaults from config rather than a developer-specific .env.
