@@ -9,8 +9,13 @@ readonly APP_DB_USER='laravel_manager'
 readonly APPLICATIONS_DIR='/var/www/apps'
 readonly NODE_MAJOR='24'
 readonly INSTALL_MARKER='/var/lib/laravel-manager/installed'
+readonly PUBLIC_IPV4_SERVICE='https://api.ipify.org'
+readonly IPTABLES_RULES='/etc/iptables/rules.v4'
+readonly SSH_INPUT_RULE='-A INPUT -p tcp -m state --state NEW -m tcp --dport 22 -j ACCEPT'
+readonly MANAGER_INPUT_RULE='-A INPUT -p tcp -m state --state NEW -m tcp --dport 8080 -j ACCEPT'
 
 INSTALL_TMP=''
+FIREWALL_TMP=''
 ADMIN_EMAIL=''
 ADMIN_PASSWORD=''
 MANAGER_URL="${MANAGER_URL:-}"
@@ -34,6 +39,10 @@ cleanup() {
             /tmp/laravel-manager-install.*) /bin/rm -rf -- "$INSTALL_TMP" ;;
         esac
     fi
+
+    if [[ -n "$FIREWALL_TMP" && -f "$FIREWALL_TMP" ]]; then
+        /bin/rm -f -- "$FIREWALL_TMP"
+    fi
 }
 
 trap 'handle_error "$?" "$LINENO"' ERR
@@ -49,7 +58,7 @@ Required environment:
 Optional environment:
   LOCAL_ADMIN_EMAIL           Seed the first administrator without a prompt
   LOCAL_ADMIN_PASSWORD       Password for the first administrator (16-72 bytes)
-  MANAGER_URL                Browser-reachable manager URL (default: first local IPv4 on port 8080)
+  MANAGER_URL                Browser-reachable manager URL (default: detected public IPv4 on port 8080)
 
 With no option, install Laravel Manager on a clean Ubuntu 24.04 VPS as root.
 USAGE
@@ -62,7 +71,7 @@ valid_repository_url() {
 }
 
 show_plan() {
-    local planned_manager_url="${MANAGER_URL:-http://SERVER_IP:8080}"
+    local planned_manager_url="${MANAGER_URL:-http://PUBLIC_IP:8080}"
 
     if [[ -n "$MANAGER_URL" ]]; then
         validate_manager_url "$MANAGER_URL" \
@@ -83,7 +92,7 @@ show_plan() {
         'Updates: sudo laravel-manager update; version: sudo laravel-manager version' \
         "Manager URL: $planned_manager_url" \
         'Application directory: /var/www/apps' \
-        'Firewall: keep Manager port 8080 private or source-IP restricted; expose ports 80/443 as needed for managed sites.'
+        'Firewall: allow TCP 8080 in the VPS subnet/NSG; the installer adds a host rule only when a supported firewall is active.'
 }
 
 validate_manager_url() {
@@ -95,16 +104,60 @@ validate_manager_url() {
     [[ -z "$port" ]] || (( 10#$port >= 1 && 10#$port <= 65535 ))
 }
 
+valid_ipv4_address() {
+    local address="$1"
+    local octet
+    local -a octets
+
+    [[ "$address" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || return 1
+    IFS='.' read -r -a octets <<< "$address"
+
+    for octet in "${octets[@]}"; do
+        (( 10#$octet <= 255 )) || return 1
+    done
+}
+
 resolve_manager_url() {
     if [[ -z "$MANAGER_URL" ]]; then
-        local server_ip
-        server_ip=$(/usr/bin/hostname -I | /usr/bin/awk '{print $1}')
-        [[ -n "$server_ip" ]] || fail 'Cannot detect a server IPv4 address. Set MANAGER_URL to the browser-reachable manager URL.'
-        MANAGER_URL="http://${server_ip}:8080"
+        local public_ip
+        public_ip=$(/usr/bin/curl --ipv4 --fail --silent --show-error --max-time 8 "$PUBLIC_IPV4_SERVICE") \
+            || fail 'Cannot detect the public IPv4 address. Set MANAGER_URL to a browser-reachable manager URL.'
+        valid_ipv4_address "$public_ip" \
+            || fail 'The public IPv4 lookup returned an invalid address. Set MANAGER_URL to a browser-reachable manager URL.'
+        MANAGER_URL="http://${public_ip}:8080"
     fi
 
     validate_manager_url "$MANAGER_URL" \
         || fail 'MANAGER_URL must be an HTTP or HTTPS URL with a hostname or IPv4 address and optional port.'
+}
+
+validate_manager_firewall_support() {
+    local input_policy
+    local input_rules
+
+    if [[ -x /usr/sbin/ufw ]] && /usr/sbin/ufw status 2>/dev/null | /usr/bin/grep -q '^Status: active'; then
+        return 0
+    fi
+
+    if [[ -f "$IPTABLES_RULES" ]] && /usr/bin/grep -Fxq -- "$SSH_INPUT_RULE" "$IPTABLES_RULES"; then
+        [[ -x /usr/sbin/iptables-restore ]] || fail 'The persistent Ubuntu firewall file exists, but iptables-restore is unavailable.'
+        /usr/bin/systemctl list-unit-files --type=service --no-legend netfilter-persistent.service \
+            | /usr/bin/grep -q '^netfilter-persistent.service' \
+            || fail 'The persistent Ubuntu firewall file exists, but netfilter-persistent.service is unavailable.'
+        return 0
+    fi
+
+    [[ -x /usr/sbin/iptables ]] || return 0
+
+    input_rules=$(/usr/sbin/iptables -S INPUT)
+    input_policy=$(printf '%s\n' "$input_rules" | /usr/bin/awk '$1 == "-P" && $2 == "INPUT" { print $3; exit }')
+
+    if [[ "$input_policy" == 'ACCEPT' ]] \
+        && ! printf '%s\n' "$input_rules" | /usr/bin/grep -Eq '^-A INPUT -j (DROP|REJECT)( |$)'; then
+        return 0
+    fi
+
+    fail 'A restrictive host firewall is active, but its persistent rules do not match the supported Ubuntu image format. Configure a persistent TCP 8080 allow rule before installing.'
 }
 
 require_repository() {
@@ -232,7 +285,8 @@ install_system_packages() {
     local php_fpm_services=()
 
     /usr/bin/apt-get update
-    /usr/bin/apt-get install -y ca-certificates curl gnupg software-properties-common
+    /usr/bin/apt-get install -y ca-certificates curl gnupg iptables software-properties-common
+    resolve_manager_url
     LC_ALL=C.UTF-8 /usr/bin/add-apt-repository --yes ppa:ondrej/php
     install_nodesource_repository
     /usr/bin/apt-get update
@@ -426,6 +480,50 @@ configure_apache() {
     /usr/bin/systemctl reload apache2.service
 }
 
+configure_manager_firewall() {
+    local input_policy
+    local input_rules
+
+    if [[ -x /usr/sbin/ufw ]] && /usr/sbin/ufw status 2>/dev/null | /usr/bin/grep -q '^Status: active'; then
+        /usr/sbin/ufw allow 8080/tcp
+        /usr/sbin/ufw status | /usr/bin/grep -Eq '^8080/tcp[[:space:]]+ALLOW' \
+            || fail 'Could not verify that UFW allows inbound TCP 8080.'
+        return 0
+    fi
+
+    if [[ -f "$IPTABLES_RULES" ]] && /usr/bin/grep -Fxq -- "$SSH_INPUT_RULE" "$IPTABLES_RULES"; then
+        FIREWALL_TMP=$(/usr/bin/mktemp /etc/iptables/.rules.v4.laravel-manager.XXXXXX)
+        if ! /usr/bin/awk \
+            -v ssh_rule="$SSH_INPUT_RULE" \
+            -v manager_rule="$MANAGER_INPUT_RULE" \
+            '$0 == manager_rule { next } { print; if ($0 == ssh_rule && !inserted) { print manager_rule; inserted = 1 } } END { if (!inserted) exit 1 }' \
+            "$IPTABLES_RULES" > "$FIREWALL_TMP"; then
+            fail 'Could not add the Manager port rule after the existing SSH rule in /etc/iptables/rules.v4.'
+        fi
+
+        /usr/sbin/iptables-restore --test < "$FIREWALL_TMP" \
+            || fail 'The updated host firewall rules failed validation; the existing rules were left in place.'
+        /bin/chown --reference="$IPTABLES_RULES" "$FIREWALL_TMP"
+        /bin/chmod --reference="$IPTABLES_RULES" "$FIREWALL_TMP"
+        /bin/mv -f -- "$FIREWALL_TMP" "$IPTABLES_RULES"
+        FIREWALL_TMP=''
+        /usr/sbin/iptables-restore < "$IPTABLES_RULES"
+        /usr/bin/systemctl enable netfilter-persistent.service
+        /usr/sbin/iptables -C INPUT -p tcp -m state --state NEW -m tcp --dport 8080 -j ACCEPT
+        return 0
+    fi
+
+    input_rules=$(/usr/sbin/iptables -S INPUT)
+    input_policy=$(printf '%s\n' "$input_rules" | /usr/bin/awk '$1 == "-P" && $2 == "INPUT" { print $3; exit }')
+
+    if [[ "$input_policy" == 'ACCEPT' ]] \
+        && ! printf '%s\n' "$input_rules" | /usr/bin/grep -Eq '^-A INPUT -j (DROP|REJECT)( |$)'; then
+        return 0
+    fi
+
+    fail 'Could not persist the TCP 8080 host firewall rule safely. The host firewall differs from the supported Ubuntu image rules.'
+}
+
 install_queue_service() {
     /usr/bin/install -o root -g root -m 0644 \
         "$APP_DIR/scripts/laravel-manager-queue.service" /etc/systemd/system/laravel-manager-queue.service
@@ -474,7 +572,11 @@ main() {
 
     require_repository
     require_root_and_platform
-    resolve_manager_url
+    if [[ -n "$MANAGER_URL" ]]; then
+        validate_manager_url "$MANAGER_URL" \
+            || fail 'MANAGER_URL must be an HTTP or HTTPS URL with a hostname or IPv4 address and optional port.'
+    fi
+    validate_manager_firewall_support
     require_clean_target
     read_admin_credentials
 
@@ -486,13 +588,14 @@ main() {
     install_helpers_and_configuration
     configure_apache
     install_queue_service
+    configure_manager_firewall
     verify_installation
 
     printf '\nLaravel Manager installed successfully.\n'
     printf 'Open: %s\n' "$MANAGER_URL"
     printf 'Administrator: %s\n' "$ADMIN_EMAIL"
-    printf 'Security: port 8080 is plain HTTP. Keep it private and use an SSH tunnel or TLS reverse proxy before signing in.\n'
-    printf 'Allow TCP ports 80 and 443 for managed sites as needed.\n'
+    printf 'Security: port 8080 uses plain HTTP. Restrict its VPS subnet/NSG ingress to trusted source IPs or put a TLS reverse proxy in front.\n'
+    printf 'Allow inbound TCP 8080 in the VPS subnet/NSG. Allow TCP ports 80 and 443 for managed sites as needed.\n'
 }
 
 main "$@"

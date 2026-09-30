@@ -33,7 +33,7 @@ curl -fsSL https://raw.githubusercontent.com/PhillipNobel/laravel-manager/main/s
   | sudo env LARAVEL_MANAGER_REPOSITORY=https://github.com/PhillipNobel/laravel-manager.git bash -s --
 ```
 
-The installer sets Laravel's `APP_URL` to the first local IPv4 address on port 8080 and prints that address at the end. If the VPS is behind NAT or has a domain for the manager, add a browser-reachable URL such as `MANAGER_URL=http://manager.example.com:8080` to `sudo env` in the installation command. Use an HTTPS URL only when a TLS reverse proxy for Laravel Manager is already configured. After the installer creates the administrator, sign in to complete first-run setup before opening Apps or Settings.
+The installer detects the VPS public IPv4 address and sets Laravel's `APP_URL` to `http://PUBLIC_IP:8080`, so page assets and Livewire requests use the browser-reachable address. If UFW is already active, it adds an allow rule for TCP 8080. On Ubuntu images that use the supported Oracle firewall format, it adds TCP 8080 to `/etc/iptables/rules.v4`, preserves existing rules, and enables `netfilter-persistent`. If public IPv4 detection is unavailable, or the manager uses a domain or another address, set `MANAGER_URL` to the browser-reachable URL in the `sudo env` installation command. Use an HTTPS URL only when a TLS reverse proxy for Laravel Manager is already configured. After the installer creates the administrator, sign in to complete first-run setup before opening Apps or Settings.
 
 For a non-mutating local check, run:
 
@@ -41,9 +41,9 @@ For a non-mutating local check, run:
 LARAVEL_MANAGER_REPOSITORY=https://github.com/PhillipNobel/laravel-manager.git bash scripts/install.sh --dry-run
 ```
 
-The installer changes the host and does not roll back completed package or service changes if a later step fails. It refuses to overwrite existing Laravel Manager paths. Review failures on a disposable clean VPS before retrying. It does not change SSH, firewall rules, DNS, or unrelated services. Configure the applications domain and other server values in Settings after login. Commit `9210f04` passed a clean Ubuntu 24.04 arm64 Multipass installation test, including login, manager pages at desktop/mobile sizes, all four services, the database, and both sudoers checks.
+The installer changes the host and does not roll back completed package or service changes if a later step fails. It refuses to overwrite existing Laravel Manager paths. Review failures on a disposable clean VPS before retrying. It adds only the TCP 8080 allow rule when UFW is already active, or the supported rule in Oracle's persistent iptables file; it does not change SSH or cloud/provider firewall rules, DNS, or unrelated services. Configure the applications domain and other server values in Settings after login. Commit `9210f04` passed a clean Ubuntu 24.04 arm64 Multipass installation test, including login, manager pages at desktop/mobile sizes, all four services, the database, and both sudoers checks.
 
-Port 8080 serves Laravel Manager over plain HTTP. Do not expose it to the public internet: keep it private and use an SSH tunnel, or put a TLS reverse proxy in front of it before signing in. Ports 80 and 443 serve managed application sites and certificates. The Manager itself does not provision TLS.
+Port 8080 serves Laravel Manager over plain HTTP. After installation, allow inbound TCP 8080 in the VPS subnet/security list; the installer handles supported local UFW and Oracle Ubuntu firewall formats. Restrict the cloud rule's source to your trusted IP where possible, because HTTP does not encrypt passwords or session cookies. Ports 80 and 443 serve managed application sites and certificates. The Manager itself does not provision TLS.
 
 ### Updating Laravel Manager
 

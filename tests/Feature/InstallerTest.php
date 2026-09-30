@@ -19,9 +19,69 @@ it('prints the Ubuntu installation plan without changing the host', function () 
             'Node.js: 24 LTS',
             'Databases: MySQL and PostgreSQL',
             'Updates: sudo laravel-manager update; version: sudo laravel-manager version',
-            'Manager URL: http://SERVER_IP:8080',
-            'Firewall: keep Manager port 8080 private or source-IP restricted',
+            'Manager URL: http://PUBLIC_IP:8080',
+            'Firewall: allow TCP 8080 in the VPS subnet/NSG; the installer adds a host rule only when a supported firewall is active.',
         );
+});
+
+it('detects the public IPv4 and safely persists Manager access on supported Ubuntu firewalls', function () {
+    $installer = file_get_contents(base_path('scripts/install.sh'));
+    $appUrlConfiguredAt = strpos($installer, 's#^APP_URL=.*#APP_URL=${MANAGER_URL}#');
+    $viewsOptimizedAt = strpos($installer, 'artisan optimize');
+
+    expect($installer)->toContain(
+        "readonly PUBLIC_IPV4_SERVICE='https://api.ipify.org'",
+        'curl --ipv4 --fail --silent --show-error --max-time 8',
+        'MANAGER_URL="http://${public_ip}:8080"',
+        'readonly IPTABLES_RULES=\'/etc/iptables/rules.v4\'',
+        'readonly SSH_INPUT_RULE=\'-A INPUT -p tcp -m state --state NEW -m tcp --dport 22 -j ACCEPT\'',
+        'readonly MANAGER_INPUT_RULE=\'-A INPUT -p tcp -m state --state NEW -m tcp --dport 8080 -j ACCEPT\'',
+        'ufw allow 8080/tcp',
+        'iptables-restore --test',
+        'iptables-restore < "$IPTABLES_RULES"',
+        'systemctl enable netfilter-persistent.service',
+        'APP_URL=${MANAGER_URL}',
+        'Allow inbound TCP 8080 in the VPS subnet/NSG',
+    )->and($appUrlConfiguredAt)->toBeInt()
+        ->and($viewsOptimizedAt)->toBeInt()
+        ->and($appUrlConfiguredAt)->toBeLessThan($viewsOptimizedAt);
+});
+
+it('adds the Manager firewall rule once after SSH while preserving other rules', function () {
+    $sshRule = '-A INPUT -p tcp -m state --state NEW -m tcp --dport 22 -j ACCEPT';
+    $managerRule = '-A INPUT -p tcp -m state --state NEW -m tcp --dport 8080 -j ACCEPT';
+    $rules = implode("\n", [
+        '*filter',
+        ':INPUT DROP [0:0]',
+        $sshRule,
+        $managerRule,
+        '-A INPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT',
+        '-A INPUT -j REJECT --reject-with icmp-host-prohibited',
+        'COMMIT',
+        '',
+    ]);
+    $awkProgram = '$0 == manager_rule { next } { print; if ($0 == ssh_rule && !inserted) { print manager_rule; inserted = 1 } } END { if (!inserted) exit 1 }';
+    $process = new SymfonyProcess([
+        '/usr/bin/awk',
+        '-v', "ssh_rule={$sshRule}",
+        '-v', "manager_rule={$managerRule}",
+        $awkProgram,
+    ]);
+    $process->setInput($rules);
+    $process->run();
+
+    expect($process->isSuccessful())->toBeTrue()
+        ->and($process->getOutput())->toBe(implode("\n", [
+            '*filter',
+            ':INPUT DROP [0:0]',
+            $sshRule,
+            $managerRule,
+            '-A INPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT',
+            '-A INPUT -j REJECT --reject-with icmp-host-prohibited',
+            'COMMIT',
+            '',
+        ]))
+        ->and(substr_count($process->getOutput(), $managerRule))->toBe(1);
 });
 
 it('installs a root-owned update command and keeps updates out of web requests', function () {
