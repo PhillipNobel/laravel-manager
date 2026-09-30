@@ -1,166 +1,73 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-09-29T04:05:02Z",
+  "generatedAt": "2026-09-30T00:56:08.955Z",
   "title": "Design System: Laravel Manager",
   "extensions": {
     "colorMeta": {
-      "clay-primary": {
+      "slate-ink": {
         "role": "primary",
-        "displayName": "Soft Clay",
+        "displayName": "Slate Ink",
+        "canonical": "#495464",
         "tonalRamp": [
-          "oklch(15% 0.024 108.5)",
-          "oklch(25% 0.024 108.5)",
-          "oklch(35% 0.024 108.5)",
-          "oklch(45% 0.024 108.5)",
-          "oklch(55% 0.024 108.5)",
-          "oklch(65% 0.024 108.5)",
-          "oklch(75% 0.024 108.5)",
-          "oklch(95% 0.024 108.5)"
+          "#101216",
+          "#1B2028",
+          "#282F3A",
+          "#384251",
+          "#495464",
+          "#697587",
+          "#8993A2",
+          "#B3BAC4"
         ]
       },
-      "clay-ink": {
+      "paper-canvas": {
         "role": "neutral",
-        "displayName": "Clay Ink",
+        "displayName": "Paper Canvas",
+        "canonical": "#F4F4F2",
         "tonalRamp": [
-          "oklch(15% 0.023 102.5)",
-          "oklch(25% 0.023 102.5)",
-          "oklch(35% 0.023 102.5)",
-          "oklch(45% 0.023 102.5)",
-          "oklch(55% 0.023 102.5)",
-          "oklch(65% 0.023 102.5)",
-          "oklch(75% 0.023 102.5)",
-          "oklch(95% 0.023 102.5)"
+          "#272726",
+          "#454543",
+          "#626260",
+          "#81817F",
+          "#A0A09E",
+          "#BDBDBB",
+          "#DADAD8",
+          "#F4F4F2"
         ]
       },
-      "moss-background": {
+      "soft-gray": {
         "role": "neutral",
-        "displayName": "Pale Moss",
+        "displayName": "Soft Gray",
+        "canonical": "#E8E8E8",
         "tonalRamp": [
-          "oklch(15% 0.010 233.2)",
-          "oklch(25% 0.010 233.2)",
-          "oklch(35% 0.010 233.2)",
-          "oklch(45% 0.010 233.2)",
-          "oklch(55% 0.010 233.2)",
-          "oklch(65% 0.010 233.2)",
-          "oklch(75% 0.010 233.2)",
-          "oklch(95% 0.010 233.2)"
+          "#242424",
+          "#404040",
+          "#5D5D5D",
+          "#797979",
+          "#969696",
+          "#B0B0B0",
+          "#CCCCCC",
+          "#E8E8E8"
         ]
       },
-      "forest-ink": {
+      "blue-gray": {
         "role": "neutral",
-        "displayName": "Forest Ink",
+        "displayName": "Blue Gray",
+        "canonical": "#BBBFCA",
         "tonalRamp": [
-          "oklch(15% 0.007 168.9)",
-          "oklch(25% 0.007 168.9)",
-          "oklch(35% 0.007 168.9)",
-          "oklch(45% 0.007 168.9)",
-          "oklch(55% 0.007 168.9)",
-          "oklch(65% 0.007 168.9)",
-          "oklch(75% 0.007 168.9)",
-          "oklch(95% 0.007 168.9)"
-        ]
-      },
-      "card-paper": {
-        "role": "neutral",
-        "displayName": "Card Paper",
-        "tonalRamp": [
-          "oklch(15% 0.012 255.3)",
-          "oklch(25% 0.012 255.3)",
-          "oklch(35% 0.012 255.3)",
-          "oklch(45% 0.012 255.3)",
-          "oklch(55% 0.012 255.3)",
-          "oklch(65% 0.012 255.3)",
-          "oklch(75% 0.012 255.3)",
-          "oklch(95% 0.012 255.3)"
-        ]
-      },
-      "moss-muted": {
-        "role": "neutral",
-        "displayName": "Muted Moss",
-        "tonalRamp": [
-          "oklch(15% 0.009 212.7)",
-          "oklch(25% 0.009 212.7)",
-          "oklch(35% 0.009 212.7)",
-          "oklch(45% 0.009 212.7)",
-          "oklch(55% 0.009 212.7)",
-          "oklch(65% 0.009 212.7)",
-          "oklch(75% 0.009 212.7)",
-          "oklch(95% 0.009 212.7)"
-        ]
-      },
-      "muted-copy": {
-        "role": "neutral",
-        "displayName": "Muted Copy",
-        "tonalRamp": [
-          "oklch(15% 0.008 192.7)",
-          "oklch(25% 0.008 192.7)",
-          "oklch(35% 0.008 192.7)",
-          "oklch(45% 0.008 192.7)",
-          "oklch(55% 0.008 192.7)",
-          "oklch(65% 0.008 192.7)",
-          "oklch(75% 0.008 192.7)",
-          "oklch(95% 0.008 192.7)"
-        ]
-      },
-      "moss-border": {
-        "role": "neutral",
-        "displayName": "Moss Border",
-        "tonalRamp": [
-          "oklch(15% 0.008 201.3)",
-          "oklch(25% 0.008 201.3)",
-          "oklch(35% 0.008 201.3)",
-          "oklch(45% 0.008 201.3)",
-          "oklch(55% 0.008 201.3)",
-          "oklch(65% 0.008 201.3)",
-          "oklch(75% 0.008 201.3)",
-          "oklch(95% 0.008 201.3)"
-        ]
-      },
-      "warm-hover": {
-        "role": "neutral",
-        "displayName": "Warm Hover",
-        "tonalRamp": [
-          "oklch(15% 0.005 215.0)",
-          "oklch(25% 0.005 215.0)",
-          "oklch(35% 0.005 215.0)",
-          "oklch(45% 0.005 215.0)",
-          "oklch(55% 0.005 215.0)",
-          "oklch(65% 0.005 215.0)",
-          "oklch(75% 0.005 215.0)",
-          "oklch(95% 0.005 215.0)"
-        ]
-      },
-      "sidebar-moss": {
-        "role": "neutral",
-        "displayName": "Sidebar Moss",
-        "tonalRamp": [
-          "oklch(15% 0.009 220.2)",
-          "oklch(25% 0.009 220.2)",
-          "oklch(35% 0.009 220.2)",
-          "oklch(45% 0.009 220.2)",
-          "oklch(55% 0.009 220.2)",
-          "oklch(65% 0.009 220.2)",
-          "oklch(75% 0.009 220.2)",
-          "oklch(95% 0.009 220.2)"
-        ]
-      },
-      "sidebar-selected": {
-        "role": "neutral",
-        "displayName": "Sidebar Selected",
-        "tonalRamp": [
-          "oklch(15% 0.009 195.7)",
-          "oklch(25% 0.009 195.7)",
-          "oklch(35% 0.009 195.7)",
-          "oklch(45% 0.009 195.7)",
-          "oklch(55% 0.009 195.7)",
-          "oklch(65% 0.009 195.7)",
-          "oklch(75% 0.009 195.7)",
-          "oklch(95% 0.009 195.7)"
+          "#202124",
+          "#33373E",
+          "#464C56",
+          "#5D6572",
+          "#767E8B",
+          "#8F97A4",
+          "#A8AFBA",
+          "#BBBFCA"
         ]
       },
       "error-red": {
         "role": "tertiary",
         "displayName": "Destructive Red",
+        "canonical": "hsl(0 72.22% 50.59%)",
         "tonalRamp": [
           "oklch(15% 0.091 78.3)",
           "oklch(25% 0.091 78.3)",
@@ -175,6 +82,7 @@
       "error-foreground": {
         "role": "neutral",
         "displayName": "Error Foreground",
+        "canonical": "hsl(0 0% 98%)",
         "tonalRamp": [
           "oklch(15% 0.014 261.5)",
           "oklch(25% 0.014 261.5)",
@@ -184,6 +92,21 @@
           "oklch(65% 0.014 261.5)",
           "oklch(75% 0.014 261.5)",
           "oklch(95% 0.014 261.5)"
+        ]
+      },
+      "control-outline": {
+        "role": "neutral",
+        "displayName": "Control Outline",
+        "canonical": "hsl(224 12.4% 54%)",
+        "tonalRamp": [
+          "#202124",
+          "#33373E",
+          "#464C56",
+          "#5D6572",
+          "#767E8B",
+          "#7B8398",
+          "#A8AFBA",
+          "#BBBFCA"
         ]
       }
     },
@@ -245,7 +168,7 @@
       "name": "Primary Button",
       "kind": "button",
       "refersTo": "button-primary",
-      "description": "Primary action with the April clay fill.",
+      "description": "Primary action with a slate fill and paper text.",
       "html": "<button class=\"ds-button-primary\" type=\"button\">Create App</button>",
       "css": ".ds-button-primary { display: inline-flex; align-items: center; justify-content: center; height: 40px; padding: 8px 16px; border: 0; border-radius: 6px; background: hsl(var(--primary)); color: hsl(var(--primary-foreground)); font: 500 14px/20px ui-sans-serif, system-ui, sans-serif; transition: background-color 150ms ease; } .ds-button-primary:hover { background: hsl(var(--primary) / 0.9); } .ds-button-primary:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; } .ds-button-primary:disabled { opacity: 0.5; pointer-events: none; }"
     },
@@ -261,7 +184,7 @@
       "name": "Text Field",
       "kind": "input",
       "refersTo": "text-field",
-      "description": "Full-width April field for editable values.",
+      "description": "April text field with a deeper blue-gray outline for clear control contrast.",
       "html": "<label class=\"ds-field-label\" for=\"ds-app-name\">Application name</label><input class=\"ds-text-field\" id=\"ds-app-name\" type=\"text\" placeholder=\"Customer Portal\" />",
       "css": ".ds-field-label { display: block; margin-bottom: 8px; color: hsl(var(--foreground)); font: 500 14px/20px ui-sans-serif, system-ui, sans-serif; } .ds-text-field { display: block; width: 100%; height: 40px; padding: 8px 12px; border: 1px solid hsl(var(--input)); border-radius: 6px; background: hsl(var(--background)); color: hsl(var(--foreground)); font: 400 14px/20px ui-sans-serif, system-ui, sans-serif; } .ds-text-field::placeholder { color: hsl(var(--muted-foreground)); } .ds-text-field:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }"
     },
@@ -285,7 +208,7 @@
       "name": "Sidebar Navigation",
       "kind": "nav",
       "refersTo": "sidebar-link-active",
-      "description": "April sidebar group with a moss-tinted active item.",
+      "description": "April sidebar group with a slate-filled active item and paper text.",
       "html": "<nav class=\"ds-sidebar\" aria-label=\"Manage\"><p class=\"ds-sidebar-label\">Manage</p><a class=\"ds-sidebar-link ds-sidebar-link-active\" href=\"#\" aria-current=\"page\"><svg aria-hidden=\"true\" viewBox=\"0 0 24 24\"><rect x=\"3.5\" y=\"3.5\" width=\"7\" height=\"7\" rx=\"1.5\"/><rect x=\"13.5\" y=\"3.5\" width=\"7\" height=\"7\" rx=\"1.5\"/><rect x=\"3.5\" y=\"13.5\" width=\"7\" height=\"7\" rx=\"1.5\"/><rect x=\"13.5\" y=\"13.5\" width=\"7\" height=\"7\" rx=\"1.5\"/></svg><span>Apps</span></a><a class=\"ds-sidebar-link\" href=\"#\"><span>Settings</span></a></nav>",
       "css": ".ds-sidebar { width: 256px; padding: 16px 8px; background: hsl(var(--sidebar-background)); color: hsl(var(--sidebar-foreground)); font: 400 14px/20px ui-sans-serif, system-ui, sans-serif; } .ds-sidebar-label { margin: 12px 8px 8px; color: hsl(var(--muted-foreground)); font-size: 12px; } .ds-sidebar-link { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 4px 8px; border-radius: 6px; color: inherit; text-decoration: none; } .ds-sidebar-link svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; } .ds-sidebar-link:hover, .ds-sidebar-link-active { background: hsl(var(--sidebar-accent)); color: hsl(var(--sidebar-accent-foreground)); } .ds-sidebar-link-active { font-weight: 500; }"
     },
@@ -308,17 +231,18 @@
   ],
   "narrative": {
     "northStar": "The Single-Server Control Room",
-    "overview": "Laravel Manager adapts April UI v1.3 into a restrained operating surface for managing Laravel applications on one server. Moss-tinted surfaces, a soft clay action color, crisp line icons, and clear border rules keep attention on app identity, status, domains, branches, PHP versions, and server settings. System sans carries interface text; monospace marks technical values an operator checks or copies.\n\nAt desktop sizes, the April sidebar anchors navigation while each page uses a focused heading and action area above a compact list or form. At narrow widths, navigation opens as a slide-in panel, app rows become cards, and form actions stack. Surface tints and borders provide depth without prominent shadows.",
+    "overview": "Laravel Manager adapts April UI v1.3 into a restrained operating surface for managing Laravel applications on one server. Paper and cool-gray surfaces, blue-gray separators, and slate actions keep attention on app identity, status, domains, branches, PHP versions, and server settings. System sans carries interface text; monospace marks technical values an operator checks or copies.\n\nAt desktop sizes, the April sidebar anchors navigation while each page uses a focused heading and action area above a compact list or form. At narrow widths, navigation opens as a slide-in panel, app rows become cards, and form actions stack. Surface tints and borders provide depth without prominent shadows.",
     "keyCharacteristics": [
-      "Moss neutrals establish the broad canvas and sidebar.",
-      "Warm clay is reserved for the primary action and compact product mark.",
-      "Compact system sans typography carries labels and operational details.",
-      "Technical values use monospace; surfaces stay flat and border-led."
+      "Paper and cool gray establish the canvas, surfaces, and sidebar.",
+      "Slate carries primary actions, selected navigation, focus, and the compact product mark.",
+      "Blue gray defines secondary borders and dividers.",
+      "Technical values use monospace; surfaces stay flat and border-led.",
+      "A deeper palette-derived blue-gray clarifies form controls."
     ],
     "rules": [
       {
-        "name": "The Clay Action Rule",
-        "body": "Keep the clay accent on primary actions and the compact product mark; let the moss neutrals carry the rest of the screen.",
+        "name": "The Slate Action Rule",
+        "body": "Use slate for primary actions, focus, and selected navigation; use paper and gray surfaces to carry the rest of the screen.",
         "section": "colors"
       },
       {
@@ -333,7 +257,7 @@
       }
     ],
     "dos": [
-      "Do keep the broad surface moss-neutral and reserve clay for the primary action and compact product mark.",
+      "Use the paper, gray, blue-gray, and slate palette by role; reserve the derived control outline for form boundaries.",
       "Do use monospace for domains, paths, and other technical values.",
       "Do separate app data and settings with compact spacing, readable labels, and thin borders.",
       "Do carry the sidebar menu into a slide-in mobile panel and present mobile app rows as cards."

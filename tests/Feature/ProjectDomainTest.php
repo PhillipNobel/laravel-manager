@@ -64,6 +64,7 @@ it('configures an authenticated project domain with one fixed helper command', f
             '/usr/local/sbin/laravel-manager-apache',
             'enable',
             'customer',
+            '8.3',
         ] && $process->timeout === 35;
     });
 });
@@ -85,6 +86,7 @@ it('refreshes domain status without requesting a reload', function () {
             '/usr/local/sbin/laravel-manager-apache',
             'status',
             'customer',
+            '8.3',
         ];
     });
 });
@@ -138,6 +140,7 @@ it('renders a Laravel public directory virtual host without invoking Apache', fu
         'customer',
         'customer.apps.example.test',
         '/var/www/apps/customer/public',
+        '8.2',
     ]);
     $process->run();
 
@@ -150,6 +153,7 @@ it('renders a Laravel public directory virtual host without invoking Apache', fu
             'AllowOverride All',
             'Require all granted',
             'customer-access.log',
+            'SetHandler "proxy:unix:/run/php/php8.2-fpm.sock|fcgi://localhost/"',
         )
         ->and($process->getOutput())->not->toContain('DocumentRoot "/var/www/apps/customer"');
 });
@@ -162,6 +166,7 @@ it('quotes application paths with spaces in Apache directives', function () {
         'customer',
         'customer.apps.example.test',
         '/var/www/customer apps/customer/public',
+        '8.3',
     ]);
     $process->run();
 
@@ -180,6 +185,7 @@ it('renders HTTPS and an HTTP redirect while keeping ACME challenges reachable',
         'customer',
         'customer.apps.example.test',
         '/var/www/apps/customer/public',
+        '8.3',
     ]);
     $httpProcess->run();
 
@@ -190,6 +196,7 @@ it('renders HTTPS and an HTTP redirect while keeping ACME challenges reachable',
         'customer',
         'customer.apps.example.test',
         '/var/www/apps/customer/public',
+        '8.3',
     ]);
     $sslProcess->run();
 
@@ -225,6 +232,7 @@ it('limits the sudo rule to fixed Apache and HTTPS helper operations', function 
     expect($sudoers)->toContain(
         '^(enable|status|ssl-status) [a-z0-9]',
         '^ssl-enable [a-z0-9]',
+        '8\\.[234]',
         '[A-Za-z0-9._%+~-]+@',
     )
         ->and($sudoers)->not->toContain('ALL,', ' /bin/sh', 'apache2ctl', 'certbot');
@@ -242,9 +250,10 @@ it('rejects unsafe Apache template values', function (array $arguments) {
     expect($process->isSuccessful())->toBeFalse()
         ->and($process->getErrorOutput())->toContain('ERROR:');
 })->with([
-    'shell metacharacter in slug' => [['customer;touch-pwned', 'customer.apps.example.test', '/var/www/apps/customer;touch-pwned/public']],
-    'directive injection in domain' => [['customer', "customer.apps.example.test\nInclude /tmp/unsafe.conf", '/var/www/apps/customer/public']],
-    'document root outside applications path' => [['customer', 'customer.apps.example.test', '/etc/apache2/public']],
+    'shell metacharacter in slug' => [['customer;touch-pwned', 'customer.apps.example.test', '/var/www/apps/customer;touch-pwned/public', '8.3']],
+    'directive injection in domain' => [['customer', "customer.apps.example.test\nInclude /tmp/unsafe.conf", '/var/www/apps/customer/public', '8.3']],
+    'document root outside applications path' => [['customer', 'customer.apps.example.test', '/etc/apache2/public', '8.3']],
+    'unsupported php version' => [['customer', 'customer.apps.example.test', '/var/www/apps/customer/public', '8.5']],
 ]);
 
 it('protects project domain pages and provides disabled actions before provisioning', function () {

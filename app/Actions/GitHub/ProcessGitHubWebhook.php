@@ -12,11 +12,12 @@ class ProcessGitHubWebhook
 {
     public function __construct(private QueueProjectDeployment $queueProjectDeployment) {}
 
-    public function handle(string $deliveryId, string $event, array $payload): array
+    public function handle(string $deliveryId, string $event, array $payload, string $payloadHash): array
     {
-        return DB::transaction(function () use ($deliveryId, $event, $payload): array {
+        return DB::transaction(function () use ($deliveryId, $event, $payload, $payloadHash): array {
             $inserted = DB::table('github_webhook_deliveries')->insertOrIgnore([
                 'delivery_id' => $deliveryId,
+                'payload_hash' => $payloadHash,
                 'event' => $event,
                 'status' => 'processing',
                 'created_at' => now(),
@@ -35,11 +36,18 @@ class ProcessGitHubWebhook
 
             $repositoryName = data_get($payload, 'repository.full_name');
             $ref = data_get($payload, 'ref');
+            $created = data_get($payload, 'created');
+            $deleted = data_get($payload, 'deleted');
+            $after = data_get($payload, 'after');
 
             if (! is_string($repositoryName)
                 || preg_match('/\A[A-Za-z0-9][A-Za-z0-9._-]{0,99}\/[A-Za-z0-9][A-Za-z0-9._-]{0,99}\z/', $repositoryName) !== 1
                 || ! is_string($ref)
-                || strlen($ref) > 255) {
+                || preg_match('/\Arefs\/heads\/[A-Za-z0-9][A-Za-z0-9._\/-]{0,119}\z/', $ref) !== 1
+                || ! is_bool($created)
+                || ! is_bool($deleted)
+                || ! is_string($after)
+                || preg_match('/\A[0-9a-f]{40}(?:[0-9a-f]{24})?\z/i', $after) !== 1) {
                 return $this->ignore($delivery, 'Push payload is missing valid repository or branch information.');
             }
 
@@ -48,7 +56,7 @@ class ProcessGitHubWebhook
                 'ref' => $ref,
             ]);
 
-            if (($payload['deleted'] ?? false) === true) {
+            if ($deleted) {
                 return $this->ignore($delivery, 'Deleted branches are not deployed.');
             }
 

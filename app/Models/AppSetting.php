@@ -12,4 +12,9 @@ class AppSetting extends Model
     {
         return static::query()->where('key', $key)->value('value') ?? (string) config("manager.{$key}");
     }
+
+    public static function initialSetupIsComplete(): bool
+    {
+        return static::valueFor('setup_completed') !== '0';
+    }
 }

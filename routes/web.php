@@ -10,6 +10,7 @@ use App\Livewire\Apps\Show as ShowProject;
 use App\Livewire\GitHub\Repositories as GitHubRepositories;
 use App\Livewire\Server\Index as ServerIndex;
 use App\Livewire\Settings\Index as SettingsIndex;
+use App\Livewire\Setup\Index as SetupIndex;
 use Illuminate\Support\Facades\Route;
 
 Route::redirect('/', '/apps');
@@ -19,14 +20,18 @@ Route::post('/login', [LoginController::class, 'store'])->name('login.store');
 Route::post('/webhooks/github', GitHubWebhookController::class)->name('webhooks.github');
 
 Route::middleware('auth')->group(function () {
-    Route::livewire('/apps', AppsIndex::class)->name('apps.index');
-    Route::livewire('/apps/create', CreateProject::class)->name('apps.create');
-    Route::livewire('/apps/{project}', ShowProject::class)->name('apps.show');
-    Route::livewire('/server', ServerIndex::class)->name('server');
-    Route::livewire('/settings', SettingsIndex::class)->name('settings');
+    Route::livewire('/setup', SetupIndex::class)->middleware('setup:incomplete')->name('setup');
     Route::get('/settings/github/connect', [GitHubController::class, 'connect'])->name('settings.github.connect');
     Route::get('/settings/github/callback', [GitHubController::class, 'callback'])->name('settings.github.callback');
-    Route::livewire('/settings/github/repositories', GitHubRepositories::class)->name('settings.github.repositories');
-    Route::post('/settings/github/disconnect', [GitHubController::class, 'disconnect'])->name('settings.github.disconnect');
     Route::post('/logout', LogoutController::class)->name('logout');
+
+    Route::middleware('setup:complete')->group(function () {
+        Route::livewire('/apps', AppsIndex::class)->name('apps.index');
+        Route::livewire('/apps/create', CreateProject::class)->name('apps.create');
+        Route::livewire('/apps/{project}', ShowProject::class)->name('apps.show');
+        Route::livewire('/server', ServerIndex::class)->name('server');
+        Route::livewire('/settings', SettingsIndex::class)->name('settings');
+        Route::livewire('/settings/github/repositories', GitHubRepositories::class)->name('settings.github.repositories');
+        Route::post('/settings/github/disconnect', [GitHubController::class, 'disconnect'])->name('settings.github.disconnect');
+    });
 });

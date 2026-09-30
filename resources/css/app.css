@@ -8,3 +8,65 @@
 @theme {
     --font-sans: ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji';
 }
+
+:root {
+    --background: 60 8.3% 95.3%;
+    --foreground: 215.6 15.6% 33.9%;
+    --card: 60 8.3% 95.3%;
+    --card-foreground: 215.6 15.6% 33.9%;
+    --popover: 60 8.3% 95.3%;
+    --popover-foreground: 215.6 15.6% 33.9%;
+    --primary: 215.6 15.6% 33.9%;
+    --primary-foreground: 60 8.3% 95.3%;
+    --secondary: 0 0% 91%;
+    --secondary-foreground: 215.6 15.6% 33.9%;
+    --muted: 0 0% 91%;
+    --muted-foreground: 215.6 15.6% 33.9%;
+    --accent: 0 0% 91%;
+    --accent-foreground: 215.6 15.6% 33.9%;
+    --border: 224 12.4% 76.3%;
+    --input: 224 12.4% 54%;
+    --ring: 215.6 15.6% 33.9%;
+    --sidebar-background: 0 0% 91%;
+    --sidebar-foreground: 215.6 15.6% 33.9%;
+    --sidebar-primary: 215.6 15.6% 33.9%;
+    --sidebar-primary-foreground: 60 8.3% 95.3%;
+    --sidebar-accent: 215.6 15.6% 33.9%;
+    --sidebar-accent-foreground: 60 8.3% 95.3%;
+    --sidebar-border: 224 12.4% 76.3%;
+    --sidebar-ring: 215.6 15.6% 33.9%;
+}
+
+.dark {
+    --background: 215.6 15.6% 33.9%;
+    --foreground: 60 8.3% 95.3%;
+    --card: 215.6 15.6% 33.9%;
+    --card-foreground: 60 8.3% 95.3%;
+    --popover: 215.6 15.6% 33.9%;
+    --popover-foreground: 60 8.3% 95.3%;
+    --primary: 60 8.3% 95.3%;
+    --primary-foreground: 215.6 15.6% 33.9%;
+    --secondary: 0 0% 91%;
+    --secondary-foreground: 215.6 15.6% 33.9%;
+    --muted: 215.6 15.6% 33.9%;
+    --muted-foreground: 60 8.3% 95.3%;
+    --accent: 0 0% 91%;
+    --accent-foreground: 215.6 15.6% 33.9%;
+    --border: 224 12.4% 76.3%;
+    --input: 224 12.4% 76.3%;
+    --ring: 224 12.4% 76.3%;
+    --sidebar-background: 215.6 15.6% 33.9%;
+    --sidebar-foreground: 60 8.3% 95.3%;
+    --sidebar-primary: 60 8.3% 95.3%;
+    --sidebar-primary-foreground: 215.6 15.6% 33.9%;
+    --sidebar-accent: 0 0% 91%;
+    --sidebar-accent-foreground: 215.6 15.6% 33.9%;
+    --sidebar-border: 224 12.4% 76.3%;
+    --sidebar-ring: 224 12.4% 76.3%;
+}
+
+input.border-input,
+select.border-input,
+textarea.border-input {
+    border-color: hsl(var(--input));
+}

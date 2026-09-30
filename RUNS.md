@@ -1,13 +1,17 @@
 # Laravel Manager RUN Roadmap
 
-RUNs are strictly sequential. Implement only the RUN explicitly requested. RUN 01 through RUN 11 are complete. RUN 12 and later remain pending until requested.
+RUNs are strictly sequential. Implement only the RUN explicitly requested. RUN 01 through RUN 16 are complete. Scope any additional work explicitly before starting it.
+
+## Required verification for every RUN
+
+In addition to local automated checks, verify each RUN on the existing disposable Ubuntu 24.04 Multipass VM `laravel-manager-run11` (or the current Ubuntu VM explicitly selected for this project). Inspect the VM before changing it, reuse its state, and do not reset/reinstall it or overwrite its application data without explicit user authorization. Test the current work in the VM without publishing unfinished changes. For UI changes, use Chrome DevTools against the VM-hosted app where practical. Record the VM name, OS version, commands, and outcomes in that RUN. A RUN is not complete until its required VM checks pass; document blockers and leave that RUN incomplete if they cannot be performed.
 
 ## Approved product direction — per-application choices
 
 - The installer does not ask which PHP version or database engine to use for an application. Laravel Manager itself keeps its fixed PHP 8.3 runtime and MySQL production database; local development remains SQLite.
 - Create App will let the administrator choose a PHP runtime (initial options: 8.2, 8.3, or 8.4) and a database engine (MySQL or PostgreSQL) for each application. The server's default PHP setting may preselect a value, but every Project stores its own choice.
 - The selected database engine is used by that application's database provisioning flow. Supported runtimes and database services must already be available on the server; never install OS packages from an HTTP request.
-- This extends the completed Create App and MySQL-only database implementation. RUN 12 owns that extension; do not implement it until RUN 12 is requested. Verify current PHP support and the simplest safe Ubuntu 24.04 package strategy when that RUN starts.
+- This extends Create App and the MySQL-only database implementation. RUN 12 owns that extension. The installer installs all supported app runtimes and database services up front; app creation only selects already available software.
 
 ## RUN 01 — Application Foundation — Complete
 
@@ -213,7 +217,7 @@ Add a GitHub webhook endpoint with signature validation, repository and branch m
 - The webhook endpoint alone is excluded from request forgery protection; manager web routes remain protected.
 - The endpoint handles only `push` events, ignores deleted branches, and queues only projects whose exact GitHub repository and configured branch match the payload.
 - Every ready project configured for the matching repository and branch receives a normal Run 07 deployment through the existing database queue; projects that are not ready or already deploying are skipped safely.
-- A unique `X-GitHub-Delivery` identifier prevents repeated deliveries from queuing duplicate deployments, including concurrent requests.
+- Unique `X-GitHub-Delivery` and signed-body SHA-256 identifiers prevent duplicate or replayed bodies from queueing twice, including concurrent requests and changed unsigned delivery headers.
 - Signed delivery metadata and outcome are recorded without storing the payload, webhook secret, or signature. Invalid signatures do not create delivery records.
 - The GitHub webhook is configured manually in GitHub with JSON content, a shared secret, and the push event. Laravel Manager does not create webhook subscriptions through the API.
 - Pest covers signature validation, authentication independence, repository/branch filtering, branch deletion, queue dispatch, skipped projects, and duplicate delivery IDs without running a real deployment.
@@ -285,7 +289,7 @@ Require the public GitHub repository URL through `LARAVEL_MANAGER_REPOSITORY`. S
 - A disposable Ubuntu 24.04 arm64 Multipass VM installed commit `9210f04`; browser login and the manager on port 8080 worked, all 14 database tables were present, Apache/PHP-FPM/MySQL/queue services were active, and both sudoers files passed `visudo`.
 - README.md, AGENTS.md, and RUNS.md document the supported platform, install steps, firewall note, services, and recovery boundary.
 
-## RUN 12 — Per-Application PHP and Database Choices — Pending
+## RUN 12 — Per-Application PHP and Database Choices — Complete
 
 ### Objective
 
@@ -293,32 +297,47 @@ Let the administrator choose each Laravel application's PHP runtime and database
 
 ### Scope
 
-Add PHP 8.2, 8.3, and 8.4 choices and MySQL/PostgreSQL selection to Create App. Store each choice on its Project and show it on the project detail page. The Settings PHP version remains only a form default. Route later database provisioning through the selected engine's controlled helper, using a separate database and least-privilege account for each app. Keep Laravel Manager itself on PHP 8.3 and its production database on MySQL.
+Add PHP 8.2, 8.3, and 8.4 choices and MySQL/PostgreSQL selection to Create App. Store each choice on its Project and show it on the project detail page. The Settings PHP version remains only a form default. Route database provisioning through the selected engine's root-owned helper, using a separate database and least-privilege account for each app. Route HTTP/HTTPS Apache sites to the selected PHP-FPM socket and run Composer/Artisan deployment commands under the selected PHP CLI. Keep Laravel Manager itself on PHP 8.3 and its production database on MySQL.
 
-Confirm the chosen PHP-FPM runtimes and both database services are available on Ubuntu 24.04 before offering them. Resolve the package source and installer integration for supported PHP versions using current documentation. Do not install packages dynamically from a web request, accept arbitrary runtime names, or add remote database providers.
+Ubuntu 24.04's archive supplies PHP 8.3; the production installer adds the signed `ppa:ondrej/php` source for PHP 8.2 and 8.4 and installs all three PHP-FPM runtimes, database drivers, MySQL, and PostgreSQL. The settings page detects running FPM/database services and each PHP/database driver pair. Create App leaves unavailable options visible but disabled with the missing requirement; the Livewire save action checks availability again. The installer is the only flow that installs these packages. Do not install packages dynamically from a web request, accept arbitrary runtime names, or add remote database providers.
 
 ### Acceptance criteria
 
 - Create App offers only the supported PHP versions 8.2, 8.3, and 8.4 and the MySQL/PostgreSQL database choices; values are validated against an explicit allowlist.
+- An unavailable runtime or database/driver option is visible, disabled, and accompanied by its missing package or service requirement; backend save validation repeats the server checks.
 - Each Project persists its own PHP version and database engine. The Settings default may preselect PHP but does not override the saved project value.
-- Project detail shows both selections, and database provisioning uses the selected engine without changing the Laravel Manager's own database configuration.
-- Each application receives a separate database and least-privilege account. Credentials are written safely to the app `.env`, never stored on Project, shown in the UI, or written to logs.
-- Server prerequisites are detected before an unavailable choice can be selected. No OS package installation is triggered by an HTTP request.
+- Project detail shows both selections, Apache uses that PHP-FPM socket for HTTP/HTTPS, and deployment uses that PHP CLI without changing Laravel Manager's own runtime/database configuration.
+- Each application receives a separate database and least-privilege account through a fixed root-owned helper. Credentials are written safely to the app `.env`, never stored on Project, shown in the UI, or written to logs.
+- The installer installs PHP 8.2/8.3/8.4 with MySQL/PostgreSQL drivers and both database services; no OS package installation is triggered by an HTTP request.
 - Pest covers form validation, persistence, engine-specific provisioning dispatch, unavailable prerequisites, failures, and secret handling. Tests fake all helper/process calls and connect to no real database.
 - Chrome DevTools verifies Create App and Project detail for both engine choices, validation, responsive behavior, and browser console.
 - README.md, AGENTS.md, and RUNS.md document the supported choices and security boundaries.
 
-## RUN 13 — First-Run Setup — Pending
+## RUN 13 — First-Run Setup — Complete
 
 ### Objective
 
 Create polished onboarding for a newly installed server.
 
-### Example flow
+### Implemented flow
 
-Create administrator; configure applications domain; verify server; connect GitHub; verify wildcard DNS; finish. After setup, show Apps with a useful empty state and Create App action. Use April UI, Impeccable, and Chrome DevTools MCP extensively.
+The installer creates the administrator before first sign-in. The authenticated wizard confirms that account, configures the base applications domain, public IP, applications directory, and default PHP version, runs read-only server checks, offers optional GitHub OAuth, and asks the administrator to confirm a wildcard DNS record. Completion opens Apps with its first-app empty state.
 
-## RUN 14 — Hardening & Production Readiness — Pending
+### Acceptance criteria
+
+- The installer-created administrator signs in to a protected setup route; no public registration or second account-creation step is added.
+- Freshly seeded installations are marked incomplete once. Re-running the seeder does not reset completed setup, and existing installations without a setup marker continue to work.
+- Apps, Server, Settings, and repository management require setup completion. The authenticated setup route, OAuth connect/callback, and logout remain available during setup.
+- Setup validates and saves the base domain, public IP, applications directory, and default PHP version. Domain, path, and PHP validation follow Settings; a public IP is required for the wildcard DNS target.
+- Server checks use the existing fixed, read-only local checks. Missing requirements are shown with their prerequisite and do not trigger installation or block completion.
+- GitHub can be connected through the existing OAuth flow but remains optional; setup progress survives the OAuth redirect.
+- The DNS step shows the wildcard record name/type/target and requires an explicit administrator confirmation. It performs no Cloudflare API or external DNS lookup.
+- Completing setup marks it complete and redirects to Apps, which shows a success message, empty state, and Create App action.
+- Pest covers setup access, login redirect, validation/persistence, server-check gating, optional GitHub, manual DNS confirmation, seeder idempotence, and compatibility for existing installations. Process calls are faked.
+- Chrome DevTools verifies wizard steps, actions, responsive layout, and the browser console at desktop and narrow/mobile sizes.
+- README.md, AGENTS.md, and RUNS.md describe the onboarding flow and its safety boundary.
+
+## RUN 14 — Hardening & Production Readiness — Complete
 
 ### Objective
 
@@ -328,18 +347,86 @@ Review the complete system for safe real-world VPS use.
 
 Authentication, authorization, CSRF, webhook verification, secret storage, filesystem permissions, sudoers, shell injection, argument escaping, database credentials, deployment locking, Apache validation, error handling, auditability, logs, and sensitive output filtering. Review every OS command call. Never expose arbitrary command execution through HTTP.
 
-## RUN 15 — Manager Updates — Pending
+### Implemented
+
+- Audited authentication/session handling, authenticated routes, the exact GitHub webhook CSRF exception and HMAC verification, OAuth state/PKCE, encrypted token storage, deployment locks/output, fixed process argument arrays/timeouts, root-owned helper boundaries, sudoers patterns, project paths, environment-file handling, and the production installer.
+- Hid GitHub access tokens from Eloquent serialization and locked the Project model property used by privileged Livewire actions.
+- Limited GitHub webhook bodies to 25 MiB, verified push-specific payload fields, deduplicated signed body fingerprints, and added output redaction for URL, DSN, and credential environment variables.
+- Documented the production trust model and warned that port 8080 uses HTTP.
+
+### Verified limits
+
+- The current installer shares `www-data` between Manager PHP-FPM, the queue worker, managed application PHP-FPM, and deployment scripts. Treat all connected repositories as trusted; this is not a multi-tenant isolation boundary.
+- Manager port 8080 is plain HTTP. Keep it private, use a trusted source-IP restriction, SSH tunnel, or TLS reverse proxy before entering credentials. Manager TLS provisioning is not part of this RUN.
+
+Pest covers Livewire model locking, token serialization, webhook size limits, and secret redaction. All process calls remain bounded and structured; all root operations remain behind the existing fixed helpers or the explicitly root-only installer.
+
+## RUN 15 — Manager Updates — Complete
 
 ### Objective
 
-Update Laravel Manager itself safely, through the UI or a simple `laravel-manager update` command.
+Update Laravel Manager itself safely through a root-owned `laravel-manager update` command; show its installed version through `laravel-manager version`. Keep self-updates out of HTTP requests.
 
-Support application code and Composer dependencies, frontend assets, migrations, cache rebuild, queue restart, and version display. Use the simplest safe update mechanism; do not build a complex package distribution system.
+Support application code and Composer dependencies, frontend assets, migrations, cache rebuild, service restart, and version display. Use the simplest safe update mechanism; do not build a complex package distribution system.
 
-## RUN 16 — Final Polish — Pending
+### Acceptance criteria
+
+- A root-owned `/usr/local/bin/laravel-manager` command supports `version` and `update`; updates require `sudo` and accept no user-selected command, path, remote, or branch.
+- The updater follows the installed HTTPS GitHub origin and checked-out branch, repairs only installer-induced executable-mode drift when file contents still match Git, refuses other dirty/non-fast-forward checkouts, and does nothing to Manager services when no update is available.
+- During an update, the app enters maintenance mode; Apache, all active supported PHP-FPM services, and the queue stop. Tracked Manager source stays root-owned; Composer may write the vendor directory as `www-data`, then ownership is restored before services restart. npm, migrations, and Artisan run as `www-data`.
+- The update installs Composer dependencies, builds frontend assets, runs migrations, clears and rebuilds Laravel caches, refreshes the CLI command, restarts services, and verifies `http://127.0.0.1:8080/login`.
+- Failure cleanup restores vendor permissions, attempts to leave maintenance mode, removes incomplete frontend artifacts, and restarts stopped services. A root-owned marker lets the same command resume after a failed or interrupted update; concurrent updates are locked. The updater never performs an automatic database/code rollback.
+- Pest covers installer command installation and CLI argument restrictions; Bash syntax validation and the local Pest suite pass; frontend assets build successfully.
+- The actual update command is smoke-tested on `laravel-manager-run11` Ubuntu 24.04, including before/after version output, service status, source ownership, and local login HTTP status. Record the exact result; do not reset or reinstall the VM.
+- README.md, AGENTS.md, and RUNS.md document the command, update downtime, recovery behavior, security boundaries, and VM verification.
+
+### Implemented and verified
+
+- Added `scripts/laravel-manager`, installed by the production installer as root-owned `/usr/local/bin/laravel-manager`. `sudo laravel-manager version` shows the installed Git version; `sudo laravel-manager update` performs the update from the installed HTTPS GitHub remote and checked-out branch.
+- The updater refuses dirty checkouts and non-fast-forward updates, accepts no user-provided process arguments, uses a lock against concurrent runs, and makes no service changes when already current.
+- Updates run in maintenance mode. Apache, the Manager PHP 8.3-FPM service, any other active supported PHP-FPM services, and the queue stop for the update window. Composer runs as `www-data`; frontend dependencies/build run in a temporary source archive without the production `.env`; Artisan migrations and optimization also run as `www-data`. Root ownership and service state are restored before the local HTTP check.
+- A root-only marker records incomplete updates and the previously active app PHP-FPM services, allowing the same command to resume safely. No database/code rollback is attempted.
+- Fixed installer permission normalization so Git-tracked executable files retain their executable bit. This prevents fresh installs from appearing dirty to the updater.
+- Added a safe repair for legacy installs: restore the executable bit only when the tracked file's content hash matches the Git index. Content changes remain blocked. README documents the one-time bootstrap command for installations that predate RUN 15.
+- Pest: 172 tests, 810 assertions passed. Bash syntax, Pint, frontend production build, and `git diff --check` passed.
+
+### Ubuntu VM verification
+
+- VM: `laravel-manager-run11`, Ubuntu 24.04.5 LTS, arm64, `192.168.252.6`.
+- The RUN 15 CLI was transferred from the local worktree into `/usr/local/bin/laravel-manager` on the VM for testing; unpublished workspace changes were not pushed.
+- The test began at commit `9210f04`. `sudo laravel-manager update` fetched and fast-forwarded to `4bf5877`, installed Composer dependencies, installed 35 npm packages in the temporary build area, built Vite assets, cleared/rebuilt Laravel caches, found no pending migrations, restarted services, and returned successfully.
+- GitHub `main` at test time advanced only README/RUNS; the lock file had no dependency changes and the database had no pending migrations. The smoke test exercised the update command and service lifecycle, but did not apply a dependency or schema change.
+- `sudo laravel-manager version` reported `Laravel Manager 4bf5877`. A second update reported “already up to date” without restarting services.
+- After update, MySQL, PHP 8.3-FPM, Apache, and the queue were active; PHP 8.2/8.4-FPM remained inactive as before. `/login` returned HTTP 200, the checkout was clean, source/vendor/build ownership was root-owned, and update markers/temp build directories were absent.
+- Simulated the old installer permission drift with `chmod 0640` on tracked `scripts/install.sh`. The updater restored the executable mode only after verifying the indexed content hash, then reported “already up to date”; the checkout was clean, services stayed active, and `/login` remained HTTP 200.
+- The first VM pass exposed that Composer started outside the application directory; the command now sets its working directory and a process-local Git safe-directory value. The successful verification above was repeated with that fix. The VM was not reinstalled or cleared.
+
+## RUN 16 — Final Polish — Complete
 
 ### Objective
 
 Review the full MVP as a cohesive product using Caveman, Impeccable, Context7, and Chrome DevTools MCP.
 
 Review simplicity, architecture, naming, unused abstractions, UI consistency, mobile behavior, errors, loading/empty states, forms, project creation, deployments, Settings, GitHub connection, onboarding, and docs. Remove unused code, speculative architecture, unnecessary packages, duplicate components, and visual inconsistencies. Keep focus on: install Laravel Manager -> Create App -> Clone -> Develop -> Push -> Deploy.
+
+### Review and changes
+
+- Reviewed the Laravel/Livewire structure, OS process boundaries, settings, GitHub flow, onboarding, app creation, project actions, deployment states, and project documentation. Existing Actions and Support classes each serve current behavior; no packages or speculative abstractions were added or removed.
+- Used April UI components and the committed moss/clay design system. Impeccable review found duplicate Create App links in the empty Apps state; the header action now appears only when the app list has rows, leaving one clear first-app action. The list retains its header action when populated.
+- Updated README.md and RUNS.md to agree that RUN 01–16 are complete and corrected the recorded RUN 15 assertion count.
+
+### Local verification
+
+- Laravel Framework 13.33.0; Livewire 4.4 and April UI 1.3 remain the installed UI stack. No dependencies were added or removed.
+- Pest: 172 tests, 811 assertions passed.
+- `npm run build`, `vendor/bin/pint --test`, `composer validate --no-check-publish`, installer `--dry-run`, Bash syntax checks, and `git diff --check` passed.
+- Context7 consulted for Laravel 13 Process API/testing and Livewire 4 locked-property/security guidance.
+- Impeccable `context.mjs` and its one required detector run were used. The detector reported no findings for `resources/views/livewire/apps/index.blade.php`.
+
+### Chrome DevTools and Ubuntu VM verification
+
+- VM: `laravel-manager-run11`, Ubuntu 24.04.5 LTS, arm64, `192.168.252.6`. Existing install remained on `4bf5877`; MySQL, Apache, PHP 8.3-FPM, and `laravel-manager-queue` were active, and `/login` returned HTTP 200 before testing.
+- Transferred the current workspace to an isolated `/tmp/laravel-manager-run16` copy and used a dedicated temporary MySQL schema for browser checks; did not change `/opt/laravel-manager` or its database.
+- Chrome DevTools tested login/logout, each setup step, the Apps empty state, populated app list, Create App's GitHub-not-connected recovery state, Settings save, Server checks, project statuses/deployment output, mobile navigation, and desktop/mobile overflow. The VM server checks reported 7/10 available, matching installed services. Browser console had no messages.
+- Desktop at 1440px and narrow layout at 500px had no horizontal overflow. The empty-state refinement was covered by a Pest regression test; the populated list keeps its top-right Create App action.
+- GitHub OAuth and real deployment were not run against an external repository. Their API/process paths remain covered by local fakes; no external account or live app was used for this visual pass.

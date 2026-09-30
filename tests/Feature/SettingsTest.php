@@ -67,7 +67,7 @@ it('saves server settings for new projects', function () {
         ->set('publicIp', '203.0.113.10')
         ->set('baseDomain', 'apps.example.test')
         ->set('applicationsDirectory', '/srv/laravel-apps')
-        ->set('defaultPhpVersion', '8.5')
+        ->set('defaultPhpVersion', '8.2')
         ->set('managerUrl', 'https://manager.example.com')
         ->call('save')
         ->assertHasNoErrors()
@@ -77,7 +77,7 @@ it('saves server settings for new projects', function () {
         ->and(AppSetting::valueFor('public_ip'))->toBe('203.0.113.10')
         ->and(AppSetting::valueFor('base_domain'))->toBe('apps.example.test')
         ->and(AppSetting::valueFor('applications_directory'))->toBe('/srv/laravel-apps')
-        ->and(AppSetting::valueFor('default_php_version'))->toBe('8.5')
+        ->and(AppSetting::valueFor('default_php_version'))->toBe('8.2')
         ->and(AppSetting::valueFor('manager_url'))->toBe('https://manager.example.com');
 });
 

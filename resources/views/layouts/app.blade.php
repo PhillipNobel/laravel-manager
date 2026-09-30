@@ -12,16 +12,22 @@
     <april:sidebar-layout class="min-h-screen">
         <april:sidebar collapsible="icon">
             <slot:header>
-                <a href="{{ route('apps.index') }}" class="flex h-14 items-center gap-3 px-4 font-semibold text-foreground" aria-label="Laravel Manager home">
+                <a href="{{ request()->routeIs('setup') ? route('setup') : route('apps.index') }}" class="flex h-14 items-center gap-3 px-4 font-semibold text-foreground" aria-label="Laravel Manager home">
                     <span class="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary text-sm font-bold text-primary-foreground" aria-hidden="true">LM</span>
                     <span class="truncate">Laravel Manager</span>
                 </a>
             </slot:header>
 
             <slot:content>
-                <april:sidebar-group>
-                    <april:sidebar-group-label>Manage</april:sidebar-group-label>
-                    <april:sidebar-group-content>
+                @if (request()->routeIs('setup'))
+                    <div class="px-4 py-5">
+                        <p class="text-sm font-medium">First-run setup</p>
+                        <p class="mt-1.5 text-xs leading-5 text-muted-foreground">Complete these steps to unlock app management.</p>
+                    </div>
+                @else
+                    <april:sidebar-group>
+                        <april:sidebar-group-label>Manage</april:sidebar-group-label>
+                        <april:sidebar-group-content>
                         <april:sidebar-menu>
                             <april:sidebar-menu-item>
                                 <april:sidebar-menu-button-link href="{{ route('apps.index') }}" :active="request()->routeIs('apps.*')" tooltip="Apps">
@@ -54,8 +60,9 @@
                                 </april:sidebar-menu-button-link>
                             </april:sidebar-menu-item>
                         </april:sidebar-menu>
-                    </april:sidebar-group-content>
-                </april:sidebar-group>
+                        </april:sidebar-group-content>
+                    </april:sidebar-group>
+                @endif
             </slot:content>
 
             <slot:footer>

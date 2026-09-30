@@ -16,7 +16,7 @@ class ProjectDatabaseNames
         $safeSlug = str_replace('-', '_', $slug);
 
         return [
-            'database_name' => 'lm_'.substr($safeSlug, 0, 52).'_'.$hash,
+            'database_name' => 'lm_'.substr($safeSlug, 0, 51).'_'.$hash,
             'database_username' => 'lm_'.substr($safeSlug, 0, 20).'_'.$hash,
         ];
     }

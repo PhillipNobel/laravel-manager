@@ -17,6 +17,7 @@ use Livewire\Livewire;
 beforeEach(function () {
     $this->actingAs(User::factory()->create());
     $this->applicationsRoot = storage_path('framework/testing/apps-'.Str::uuid());
+    Process::fake(fn (PendingProcess $process) => fakeAvailableServerCommand($process) ?? Process::result());
 
     AppSetting::query()->create(['key' => 'applications_directory', 'value' => $this->applicationsRoot]);
     AppSetting::query()->create(['key' => 'base_domain', 'value' => 'apps.example.test']);
@@ -60,6 +61,10 @@ it('clones a selected repository and prepares a secure Laravel environment', fun
 
     Process::preventStrayProcesses();
     Process::fake(function (PendingProcess $process) use (&$statusDuringClone) {
+        if ($serverCheck = fakeAvailableServerCommand($process)) {
+            return $serverCheck;
+        }
+
         $command = $process->command;
 
         if ($command[1] === 'check-ref-format') {
@@ -93,6 +98,7 @@ it('clones a selected repository and prepares a secure Laravel environment', fun
         ->set('repositoryName', 'octocat/customer-portal')
         ->set('branch', 'stable')
         ->set('phpVersion', '8.4')
+        ->set('databaseEngine', 'pgsql')
         ->call('save')
         ->assertHasNoErrors();
 
@@ -102,6 +108,8 @@ it('clones a selected repository and prepares a secure Laravel environment', fun
     $environment = File::get($this->applicationsRoot.'/customer/.env');
 
     expect($project->status)->toBe(ProjectStatus::Active)
+        ->and($project->php_version)->toBe('8.4')
+        ->and($project->database_engine->value)->toBe('pgsql')
         ->and($project->domain)->toBe('customer.apps.example.test')
         ->and($project->repository_name)->toBe('octocat/customer-portal')
         ->and($project->repository_url)->toBe('https://github.com/octocat/customer-portal')
@@ -133,7 +141,7 @@ it('clones a selected repository and prepares a secure Laravel environment', fun
 
 it('rejects a repository or branch that was not offered by GitHub', function () {
     Process::preventStrayProcesses();
-    Process::fake();
+    Process::fake(fn (PendingProcess $process) => fakeAvailableServerCommand($process) ?? Process::result());
 
     Livewire::test(Create::class)
         ->set('name', 'Customer Portal')
@@ -145,7 +153,7 @@ it('rejects a repository or branch that was not offered by GitHub', function () 
         ->assertSee('Use letters, numbers, dots, hyphens, or slashes in the branch name.');
 
     expect(Project::query()->count())->toBe(0);
-    Process::assertNothingRan();
+    Process::assertNotRan(fn (PendingProcess $process): bool => ($process->command[0] ?? null) === 'git');
 });
 
 it('verifies that the selected repository is still accessible before creating a project', function () {
@@ -170,7 +178,7 @@ it('verifies that the selected repository is still accessible before creating a 
     ]);
 
     Process::preventStrayProcesses();
-    Process::fake();
+    Process::fake(fn (PendingProcess $process) => fakeAvailableServerCommand($process) ?? Process::result());
 
     Livewire::test(Create::class)
         ->set('name', 'Customer Portal')
@@ -182,7 +190,7 @@ it('verifies that the selected repository is still accessible before creating a 
         ->assertHasErrors('repositoryName');
 
     expect(Project::query()->count())->toBe(0);
-    Process::assertNothingRan();
+    Process::assertNotRan(fn (PendingProcess $process): bool => ($process->command[0] ?? null) === 'git');
 });
 
 it('marks a failed clone failed without logging GitHub credentials', function () {
@@ -190,6 +198,10 @@ it('marks a failed clone failed without logging GitHub credentials', function ()
 
     Process::preventStrayProcesses();
     Process::fake(function (PendingProcess $process) use ($encodedAuthorization) {
+        if ($serverCheck = fakeAvailableServerCommand($process)) {
+            return $serverCheck;
+        }
+
         if ($process->command[1] === 'check-ref-format') {
             return Process::result(output: 'stable');
         }
@@ -220,6 +232,10 @@ it('marks a failed clone failed without logging GitHub credentials', function ()
 it('uses Git to reject an invalid branch before making the application directory', function () {
     Process::preventStrayProcesses();
     Process::fake(function (PendingProcess $process) {
+        if ($serverCheck = fakeAvailableServerCommand($process)) {
+            return $serverCheck;
+        }
+
         return Process::result(
             errorOutput: 'fatal: invalid branch name',
             exitCode: $process->command[1] === 'check-ref-format' ? 1 : 2,
@@ -251,7 +267,7 @@ it('does not overwrite an existing application path', function () {
     File::put($existingPath.'/keep.txt', 'leave this data untouched');
 
     Process::preventStrayProcesses();
-    Process::fake();
+    Process::fake(fn (PendingProcess $process) => fakeAvailableServerCommand($process) ?? Process::result());
 
     Livewire::test(Create::class)
         ->set('name', 'Customer Portal')
@@ -278,7 +294,7 @@ it('does not follow an existing application path symlink', function () {
     symlink($targetPath, $linkPath);
 
     Process::preventStrayProcesses();
-    Process::fake();
+    Process::fake(fn (PendingProcess $process) => fakeAvailableServerCommand($process) ?? Process::result());
 
     Livewire::test(Create::class)
         ->set('name', 'Customer Portal')
@@ -302,6 +318,10 @@ it('does not follow an existing application path symlink', function () {
 it('marks a repository without Laravel files as failed', function () {
     Process::preventStrayProcesses();
     Process::fake(function (PendingProcess $process) {
+        if ($serverCheck = fakeAvailableServerCommand($process)) {
+            return $serverCheck;
+        }
+
         if ($process->command[1] === 'check-ref-format') {
             return Process::result(output: 'stable');
         }

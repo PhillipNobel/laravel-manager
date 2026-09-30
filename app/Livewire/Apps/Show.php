@@ -15,6 +15,7 @@ use App\Models\GitHubConnection;
 use App\Models\Project;
 use Illuminate\View\View;
 use Livewire\Attributes\Layout;
+use Livewire\Attributes\Locked;
 use Livewire\Attributes\Title;
 use Livewire\Component;
 
@@ -22,6 +23,7 @@ use Livewire\Component;
 #[Title('Project')]
 class Show extends Component
 {
+    #[Locked]
     public Project $project;
 
     public function mount(Project $project): void

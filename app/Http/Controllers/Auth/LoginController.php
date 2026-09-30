@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Auth;
 
+use App\Models\AppSetting;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -41,6 +42,10 @@ class LoginController
         RateLimiter::clear($key);
         $request->session()->regenerate();
 
-        return redirect()->intended(route('apps.index'));
+        $destination = AppSetting::initialSetupIsComplete()
+            ? route('apps.index')
+            : route('setup');
+
+        return redirect()->intended($destination);
     }
 }

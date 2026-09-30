@@ -3,12 +3,14 @@
 namespace App\Livewire\Apps;
 
 use App\Actions\Projects\ProvisionProject;
+use App\Enums\DatabaseEngine;
 use App\Enums\ProjectStatus;
 use App\Models\AppSetting;
 use App\Models\GitHubConnection;
 use App\Models\Project;
 use App\Support\DomainGenerator;
 use App\Support\GitHubApi;
+use App\Support\ServerEnvironment;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 use Livewire\Attributes\Computed;
@@ -29,6 +31,12 @@ class Create extends Component
 
     public string $phpVersion = '';
 
+    public string $databaseEngine = '';
+
+    public array $phpOptions = [];
+
+    public array $databaseOptions = [];
+
     public string $repositoryName = '';
 
     public array $repositories = [];
@@ -39,8 +47,6 @@ class Create extends Component
 
     public function mount(GitHubApi $github): void
     {
-        $this->phpVersion = AppSetting::valueFor('default_php_version');
-
         $connection = GitHubConnection::query()->first();
 
         if (! $connection) {
@@ -48,6 +54,17 @@ class Create extends Component
         }
 
         $this->githubConnected = true;
+        $this->phpOptions = ServerEnvironment::phpOptions();
+        $availablePhpVersions = collect($this->phpOptions)
+            ->where('available', true)
+            ->pluck('value')
+            ->all();
+        $defaultPhpVersion = AppSetting::valueFor('default_php_version');
+        $this->phpVersion = in_array($defaultPhpVersion, $availablePhpVersions, true)
+            ? $defaultPhpVersion
+            : ($availablePhpVersions[0] ?? '');
+
+        $this->updateDatabaseOptions();
 
         try {
             $this->repositories = array_values(array_filter(
@@ -71,6 +88,10 @@ class Create extends Component
     public function updated(string $property): void
     {
         $this->resetValidation($property);
+
+        if ($property === 'phpVersion' && $this->githubConnected) {
+            $this->updateDatabaseOptions();
+        }
     }
 
     protected function rules(): array
@@ -87,6 +108,7 @@ class Create extends Component
             'repositoryName' => ['required', Rule::in(collect($this->repositories)->pluck('full_name')->all())],
             'branch' => ['required', 'string', 'max:120', 'regex:/\A[A-Za-z0-9][A-Za-z0-9._\/-]{0,119}\z/'],
             'phpVersion' => ['required', Rule::in(config('manager.php_versions'))],
+            'databaseEngine' => ['required', Rule::in(array_column(DatabaseEngine::cases(), 'value'))],
         ];
     }
 
@@ -96,6 +118,8 @@ class Create extends Component
             'repositoryName.required' => 'Choose a GitHub repository.',
             'repositoryName.in' => 'Choose a repository listed by GitHub.',
             'branch.regex' => 'Use letters, numbers, dots, hyphens, or slashes in the branch name.',
+            'databaseEngine.required' => 'Choose an available database engine.',
+            'databaseEngine.in' => 'Choose MySQL or PostgreSQL.',
         ];
     }
 
@@ -117,6 +141,19 @@ class Create extends Component
         $this->repositoryName = trim($this->repositoryName);
 
         $validated = $this->validate();
+
+        if ($requirement = ServerEnvironment::phpRequirement($validated['phpVersion'])) {
+            $this->addError('phpVersion', "PHP {$validated['phpVersion']} is unavailable. {$requirement}");
+
+            return;
+        }
+
+        $databaseEngine = DatabaseEngine::from($validated['databaseEngine']);
+        if ($requirement = ServerEnvironment::databaseRequirement($validated['phpVersion'], $databaseEngine)) {
+            $this->addError('databaseEngine', "{$databaseEngine->label()} is unavailable. {$requirement}");
+
+            return;
+        }
 
         $connection = GitHubConnection::query()->first();
 
@@ -151,6 +188,7 @@ class Create extends Component
             'repository_name' => $repository['full_name'],
             'branch' => $validated['branch'],
             'php_version' => $validated['phpVersion'],
+            'database_engine' => $databaseEngine,
             'status' => ProjectStatus::Pending,
         ]);
 
@@ -162,7 +200,23 @@ class Create extends Component
     public function render(): View
     {
         return view('livewire.apps.create', [
-            'phpVersions' => config('manager.php_versions'),
+            'hasAvailablePhpVersion' => collect($this->phpOptions)->contains('available', true),
+            'hasAvailableDatabaseEngine' => collect($this->databaseOptions)->contains('available', true),
         ]);
+    }
+
+    private function updateDatabaseOptions(): void
+    {
+        $this->databaseOptions = ServerEnvironment::databaseOptions($this->phpVersion);
+        $availableEngines = collect($this->databaseOptions)
+            ->where('available', true)
+            ->pluck('value')
+            ->all();
+
+        if (! in_array($this->databaseEngine, $availableEngines, true)) {
+            $this->databaseEngine = in_array(DatabaseEngine::MySql->value, $availableEngines, true)
+                ? DatabaseEngine::MySql->value
+                : ($availableEngines[0] ?? '');
+        }
     }
 }

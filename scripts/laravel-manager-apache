@@ -32,6 +32,7 @@ CERTBOT_DEPLOY_HOOK_CONTENT = "#!/bin/sh\nexec /usr/bin/systemctl reload apache2
 SAFE_PATH = re.compile(r"\A/[A-Za-z0-9._/ -]+\Z")
 SAFE_SLUG = re.compile(r"\A[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
 SAFE_LABEL = re.compile(r"\A[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
+SUPPORTED_PHP_VERSIONS = {"8.2", "8.3", "8.4"}
 SAFE_EMAIL = re.compile(
     r"\A[A-Za-z0-9._%+~-]+@"
     r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
@@ -46,6 +47,20 @@ class HelperError(Exception):
 def validate_slug(slug: str) -> None:
     if len(slug) > 63 or not SAFE_SLUG.fullmatch(slug):
         raise HelperError("Invalid application slug.")
+
+
+def validate_php_version(version: str) -> None:
+    if version not in SUPPORTED_PHP_VERSIONS:
+        raise HelperError("Invalid PHP-FPM version.")
+
+
+def php_handler(version: str) -> str:
+    validate_php_version(version)
+    return (
+        '\n    <FilesMatch "\\.php$">\n'
+        f'        SetHandler "proxy:unix:/run/php/php{version}-fpm.sock|fcgi://localhost/"\n'
+        "    </FilesMatch>"
+    )
 
 
 def validate_domain(domain: str) -> None:
@@ -69,10 +84,17 @@ def validate_document_root(document_root: str, slug: str) -> None:
         raise HelperError("Invalid Laravel public directory.")
 
 
-def render_vhost(slug: str, domain: str, document_root: str, redirect_https: bool = False) -> str:
+def render_vhost(
+    slug: str,
+    domain: str,
+    document_root: str,
+    php_version: str,
+    redirect_https: bool = False,
+) -> str:
     validate_slug(slug)
     validate_domain(domain)
     validate_document_root(document_root, slug)
+    validate_php_version(php_version)
 
     redirect = ""
     if redirect_https:
@@ -90,7 +112,7 @@ def render_vhost(slug: str, domain: str, document_root: str, redirect_https: boo
         Options FollowSymLinks
         AllowOverride All
         Require all granted
-    </Directory>{redirect}
+    </Directory>{php_handler(php_version)}{redirect}
 
     ErrorLog ${{APACHE_LOG_DIR}}/{slug}-error.log
     CustomLog ${{APACHE_LOG_DIR}}/{slug}-access.log combined
@@ -98,10 +120,11 @@ def render_vhost(slug: str, domain: str, document_root: str, redirect_https: boo
 """
 
 
-def render_ssl_vhost(slug: str, domain: str, document_root: str) -> str:
+def render_ssl_vhost(slug: str, domain: str, document_root: str, php_version: str) -> str:
     validate_slug(slug)
     validate_domain(domain)
     validate_document_root(document_root, slug)
+    validate_php_version(php_version)
 
     certificate_directory = f"/etc/letsencrypt/live/{domain}"
 
@@ -113,7 +136,7 @@ def render_ssl_vhost(slug: str, domain: str, document_root: str) -> str:
         Options FollowSymLinks
         AllowOverride All
         Require all granted
-    </Directory>
+    </Directory>{php_handler(php_version)}
 
     SSLEngine on
     SSLCertificateFile "{certificate_directory}/fullchain.pem"
@@ -445,7 +468,7 @@ def ssl_site_enabled(slug: str, site_file: Path) -> bool:
     return enabled_site_name(f"{slug}-le-ssl.conf", site_file)
 
 
-def ssl_status(slug: str, domain: str, public_path: Path) -> str:
+def ssl_status(slug: str, domain: str, public_path: Path, php_version: str) -> str:
     site_file = ssl_site_file(slug)
     enabled_file = SITES_ENABLED / site_file.name
     has_certificate = certificate_material_exists(domain)
@@ -454,7 +477,7 @@ def ssl_status(slug: str, domain: str, public_path: Path) -> str:
 
     if not has_enabled_link:
         if has_site_file:
-            expected_ssl_content = render_ssl_vhost(slug, domain, str(public_path))
+            expected_ssl_content = render_ssl_vhost(slug, domain, str(public_path), php_version)
             require_root_owned_regular_file(site_file)
             if read_site_file(site_file) != expected_ssl_content:
                 raise HelperError("An existing HTTPS site file differs from Laravel Manager's configuration.")
@@ -462,8 +485,8 @@ def ssl_status(slug: str, domain: str, public_path: Path) -> str:
         if has_certificate:
             certificate_expiry(domain)
 
-        http_content = render_vhost(slug, domain, str(public_path))
-        if site_status(slug, domain, public_path, http_content, SITES_AVAILABLE / f"{slug}.conf") != "ACTIVE":
+        http_content = render_vhost(slug, domain, str(public_path), php_version)
+        if site_status(slug, domain, public_path, http_content, SITES_AVAILABLE / f"{slug}.conf", php_version) != "ACTIVE":
             return "PENDING"
 
         return "PENDING"
@@ -475,7 +498,7 @@ def ssl_status(slug: str, domain: str, public_path: Path) -> str:
     if certificate_end is None:
         raise HelperError("Let's Encrypt certificate is unavailable.")
 
-    expected_ssl_content = render_ssl_vhost(slug, domain, str(public_path))
+    expected_ssl_content = render_ssl_vhost(slug, domain, str(public_path), php_version)
     require_root_owned_regular_file(site_file)
     if read_site_file(site_file) != expected_ssl_content:
         raise HelperError("An existing HTTPS site file differs from Laravel Manager's configuration.")
@@ -484,8 +507,8 @@ def ssl_status(slug: str, domain: str, public_path: Path) -> str:
     if not ssl_module_enabled():
         raise HelperError("Apache mod_ssl is not enabled.")
 
-    http_content = render_vhost(slug, domain, str(public_path), redirect_https=True)
-    if site_status(slug, domain, public_path, http_content, SITES_AVAILABLE / f"{slug}.conf") != "ACTIVE":
+    http_content = render_vhost(slug, domain, str(public_path), php_version, redirect_https=True)
+    if site_status(slug, domain, public_path, http_content, SITES_AVAILABLE / f"{slug}.conf", php_version) != "ACTIVE":
         return "PENDING"
 
     if certificate_end <= datetime.now(timezone.utc):
@@ -494,17 +517,17 @@ def ssl_status(slug: str, domain: str, public_path: Path) -> str:
     return "ACTIVE|"+certificate_end.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def enable_ssl(slug: str, domain: str, public_path: Path, email: str) -> str:
+def enable_ssl(slug: str, domain: str, public_path: Path, php_version: str, email: str) -> str:
     if len(email) > 254 or not SAFE_EMAIL.fullmatch(email):
         raise HelperError("Invalid administrator email address.")
 
-    current_status = ssl_status(slug, domain, public_path)
+    current_status = ssl_status(slug, domain, public_path, php_version)
     if current_status.startswith("ACTIVE|"):
         return current_status
 
     http_site_file = SITES_AVAILABLE / f"{slug}.conf"
-    base_http_content = render_vhost(slug, domain, str(public_path))
-    redirect_http_content = render_vhost(slug, domain, str(public_path), redirect_https=True)
+    base_http_content = render_vhost(slug, domain, str(public_path), php_version)
+    redirect_http_content = render_vhost(slug, domain, str(public_path), php_version, redirect_https=True)
     http_status_content = read_site_file(http_site_file) if os.path.lexists(http_site_file) else ""
 
     if http_status_content not in {base_http_content, redirect_http_content}:
@@ -545,7 +568,7 @@ def enable_ssl(slug: str, domain: str, public_path: Path, email: str) -> str:
     if not ssl_module_enabled():
         raise HelperError("Apache mod_ssl could not be enabled.")
 
-    expected_ssl_content = render_ssl_vhost(slug, domain, str(public_path))
+    expected_ssl_content = render_ssl_vhost(slug, domain, str(public_path), php_version)
     https_site_file, created_ssl_file = expected_site_config(f"{slug}-le-ssl.conf", expected_ssl_content)
     was_ssl_enabled = ssl_site_enabled(slug, https_site_file)
     created_ssl_link = False
@@ -600,7 +623,7 @@ def remove_enabled_site(slug: str) -> None:
     run_command([A2DISSITE, f"{slug}.conf"], "Apache site rollback")
 
 
-def site_status(slug: str, domain: str, public_path: Path, content: str, site_file: Path) -> str:
+def site_status(slug: str, domain: str, public_path: Path, content: str, site_file: Path, php_version: str) -> str:
     if not os.path.lexists(site_file):
         if os.path.lexists(SITES_ENABLED / f"{slug}.conf"):
             raise HelperError("Apache enabled-site link has no matching configuration file.")
@@ -615,7 +638,7 @@ def site_status(slug: str, domain: str, public_path: Path, content: str, site_fi
     tls_enabled_file = SITES_ENABLED / tls_site_file.name
     if os.path.lexists(tls_site_file):
         require_root_owned_regular_file(tls_site_file)
-        expected_tls_content = render_ssl_vhost(slug, domain, str(public_path))
+        expected_tls_content = render_ssl_vhost(slug, domain, str(public_path), php_version)
         if read_site_file(tls_site_file) != expected_tls_content:
             raise HelperError("An existing HTTPS site file differs from Laravel Manager's configuration.")
 
@@ -670,14 +693,14 @@ def enable_site(slug: str, content: str, site_file: Path, created_file: bool) ->
 
 
 def main(arguments: list[str]) -> int:
-    if len(arguments) == 4 and arguments[0] in {"render", "render-https-redirect", "render-ssl"}:
+    if len(arguments) == 5 and arguments[0] in {"render", "render-https-redirect", "render-ssl"}:
         try:
             if arguments[0] == "render":
-                content = render_vhost(arguments[1], arguments[2], arguments[3])
+                content = render_vhost(arguments[1], arguments[2], arguments[3], arguments[4])
             elif arguments[0] == "render-https-redirect":
-                content = render_vhost(arguments[1], arguments[2], arguments[3], redirect_https=True)
+                content = render_vhost(arguments[1], arguments[2], arguments[3], arguments[4], redirect_https=True)
             else:
-                content = render_ssl_vhost(arguments[1], arguments[2], arguments[3])
+                content = render_ssl_vhost(arguments[1], arguments[2], arguments[3], arguments[4])
 
             print(content, end="")
             return 0
@@ -690,13 +713,13 @@ def main(arguments: list[str]) -> int:
         return 0
 
     valid_request = (
-        len(arguments) == 2 and arguments[0] in {"enable", "status", "ssl-status"}
-    ) or (len(arguments) == 3 and arguments[0] == "ssl-enable")
+        len(arguments) == 3 and arguments[0] in {"enable", "status", "ssl-status"}
+    ) or (len(arguments) == 4 and arguments[0] == "ssl-enable")
 
     if not valid_request:
         print(
-            "Usage: laravel-manager-apache enable|status|ssl-enable|ssl-status <slug> "
-            "[administrator-email]",
+            "Usage: laravel-manager-apache enable|status|ssl-status <slug> <php-version> "
+            "or ssl-enable <slug> <php-version> <administrator-email>",
             file=sys.stderr,
         )
         return 2
@@ -705,28 +728,30 @@ def main(arguments: list[str]) -> int:
         require_root()
         require_site_directories()
         slug = arguments[1]
-        email = arguments[2] if arguments[0] == "ssl-enable" else None
+        php_version = arguments[2]
+        validate_php_version(php_version)
+        email = arguments[3] if arguments[0] == "ssl-enable" else None
         domain, public_path = project_details(slug)
         site_file = SITES_AVAILABLE / f"{slug}.conf"
 
         if arguments[0] == "status":
             redirect_https = os.path.lexists(SITES_ENABLED / f"{slug}-le-ssl.conf")
-            content = render_vhost(slug, domain, str(public_path), redirect_https=redirect_https)
-            print(site_status(slug, domain, public_path, content, site_file))
+            content = render_vhost(slug, domain, str(public_path), php_version, redirect_https=redirect_https)
+            print(site_status(slug, domain, public_path, content, site_file, php_version))
             return 0
 
         if arguments[0] == "ssl-status":
-            print(ssl_status(slug, domain, public_path))
+            print(ssl_status(slug, domain, public_path, php_version))
             return 0
 
         if arguments[0] == "ssl-enable":
             if email is None:
                 raise HelperError("Administrator email address is required.")
-            print(enable_ssl(slug, domain, public_path, email))
+            print(enable_ssl(slug, domain, public_path, php_version, email))
             return 0
 
         redirect_https = os.path.lexists(SITES_ENABLED / f"{slug}-le-ssl.conf")
-        content = render_vhost(slug, domain, str(public_path), redirect_https=redirect_https)
+        content = render_vhost(slug, domain, str(public_path), php_version, redirect_https=redirect_https)
         site_file, created_file = expected_site_config(f"{slug}.conf", content)
         enable_site(slug, content, site_file, created_file)
         print("ACTIVE")

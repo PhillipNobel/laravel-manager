@@ -1,15 +1,21 @@
 <div class="space-y-7">
+    @if (session('status'))
+        <p role="status" class="rounded-md bg-secondary px-3.5 py-3 text-sm text-secondary-foreground">{{ session('status') }}</p>
+    @endif
+
     <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
             <h1 class="text-2xl font-semibold tracking-tight">Apps</h1>
             <p class="mt-1.5 text-sm text-muted-foreground">Manage the Laravel applications on this server.</p>
         </div>
-        <april:button-link href="{{ route('apps.create') }}">
-            <svg aria-hidden="true" class="-ml-1 size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 5v14M5 12h14" />
-            </svg>
-            Create App
-        </april:button-link>
+        @if ($projects->isNotEmpty())
+            <april:button-link href="{{ route('apps.create') }}">
+                <svg aria-hidden="true" class="-ml-1 size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 5v14M5 12h14" />
+                </svg>
+                Create App
+            </april:button-link>
+        @endif
     </div>
 
     @if ($projects->isEmpty())

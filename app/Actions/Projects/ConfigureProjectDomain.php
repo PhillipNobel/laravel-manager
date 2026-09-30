@@ -45,6 +45,7 @@ class ConfigureProjectDomain
             config('manager.apache_helper'),
             $operation,
             $project->slug,
+            $project->php_version ?: '8.3',
         ];
 
         try {
@@ -85,6 +86,10 @@ class ConfigureProjectDomain
 
         if (! preg_match('/\A[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\z/', $project->slug)) {
             return 'The application slug is invalid. Review the project before configuring Apache.';
+        }
+
+        if (! in_array($project->php_version ?: '8.3', config('manager.php_versions'), true)) {
+            return 'Choose a supported PHP-FPM version before configuring Apache.';
         }
 
         $baseDomain = AppSetting::valueFor('base_domain');

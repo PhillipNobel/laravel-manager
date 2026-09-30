@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Narrow, root-owned MySQL database provisioner for Ubuntu 24.04."""
+"""Narrow, root-owned per-project database provisioner for Ubuntu 24.04."""
 
 from __future__ import annotations
 
@@ -17,8 +17,11 @@ from pathlib import Path
 
 SETTINGS_FILE = Path("/etc/laravel-manager/database.json")
 MYSQL = "/usr/bin/mysql"
+PSQL = "/usr/bin/psql"
+RUNUSER = "/usr/sbin/runuser"
 GIT = "/usr/bin/git"
 SAFE_SLUG = re.compile(r"\A[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
+SAFE_DATABASE_NAME = re.compile(r"\A[a-z0-9_]{1,63}\Z")
 ENV_KEYS = (
     "DB_CONNECTION",
     "DB_URL",
@@ -46,16 +49,16 @@ def project_database_names(slug: str) -> tuple[str, str]:
     validate_slug(slug)
     suffix = hashlib.sha256(slug.encode("ascii")).hexdigest()[:8]
     safe_slug = slug.replace("-", "_")
-    database_name = f"lm_{safe_slug[:52]}_{suffix}"
+    database_name = f"lm_{safe_slug[:51]}_{suffix}"
     username = f"lm_{safe_slug[:20]}_{suffix}"
     if len(database_name) > 64 or len(username) > 32:
         raise HelperError("INVALID_PROJECT")
     return database_name, username
 
 
-def require_root() -> None:
+def require_root(unavailable_code: str) -> None:
     if os.geteuid() != 0:
-        raise HelperError("MYSQL_UNAVAILABLE")
+        raise HelperError(unavailable_code)
 
 
 def require_root_owned_regular_file(path: Path) -> None:
@@ -68,15 +71,15 @@ def require_root_owned_regular_file(path: Path) -> None:
         raise HelperError("MYSQL_UNAVAILABLE")
 
 
-def load_applications_root() -> Path:
+def load_applications_root(unavailable_code: str = "MYSQL_UNAVAILABLE") -> Path:
     require_root_owned_regular_file(SETTINGS_FILE)
     try:
         settings = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, ValueError) as error:
-        raise HelperError("MYSQL_UNAVAILABLE") from error
+        raise HelperError(unavailable_code) from error
 
     if not isinstance(settings, dict) or set(settings) != {"applications_directory"}:
-        raise HelperError("MYSQL_UNAVAILABLE")
+        raise HelperError(unavailable_code)
 
     applications_directory = settings.get("applications_directory")
     if not isinstance(applications_directory, str):
@@ -96,8 +99,8 @@ def load_applications_root() -> Path:
     return root
 
 
-def project_environment(slug: str) -> tuple[int, str, os.stat_result]:
-    root = load_applications_root()
+def project_environment(slug: str, unavailable_code: str = "MYSQL_UNAVAILABLE") -> tuple[int, str, os.stat_result]:
+    root = load_applications_root(unavailable_code)
     directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
     root_descriptor = -1
     project_descriptor = -1
@@ -176,8 +179,17 @@ def mysql_environment() -> dict[str, str]:
     }
 
 
-def require_env_is_ignored(slug: str) -> None:
-    root = load_applications_root()
+def postgres_environment() -> dict[str, str]:
+    return {
+        "PATH": "/usr/sbin:/usr/bin:/sbin:/bin",
+        "HOME": "/var/lib/postgresql",
+        "LANG": "C",
+        "LC_ALL": "C",
+    }
+
+
+def require_env_is_ignored(slug: str, unavailable_code: str = "MYSQL_UNAVAILABLE") -> None:
+    root = load_applications_root(unavailable_code)
     try:
         result = subprocess.run(
             [GIT, "--no-pager", "-c", "core.fsmonitor=false", "check-ignore", "--quiet", "--", ".env"],
@@ -374,18 +386,144 @@ def rollback(database_name: str, username: str, database_created: bool, user_cre
         return False
 
 
-def provision(slug: str) -> None:
+def run_postgres_admin_sql(sql: str, failure_code: str) -> str:
+    try:
+        result = subprocess.run(
+            [
+                RUNUSER,
+                "-u",
+                "postgres",
+                "--",
+                PSQL,
+                "--no-psqlrc",
+                "--set=ON_ERROR_STOP=1",
+                "--tuples-only",
+                "--no-align",
+                "--dbname=postgres",
+            ],
+            input=sql,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            encoding="utf-8",
+            timeout=12,
+            env=postgres_environment(),
+        )
+    except (OSError, subprocess.TimeoutExpired, UnicodeError) as error:
+        raise HelperError("POSTGRESQL_UNAVAILABLE") from error
+
+    if result.returncode != 0:
+        raise HelperError(failure_code)
+
+    return result.stdout.strip()
+
+
+def postgres_identifier(value: str) -> str:
+    if not SAFE_DATABASE_NAME.fullmatch(value):
+        raise HelperError("INVALID_PROJECT")
+    return f'"{value}"'
+
+
+def postgres_string(value: str) -> str:
+    if not re.fullmatch(r"[a-zA-Z0-9_.-]{1,128}", value):
+        raise HelperError("INVALID_PROJECT")
+    return "'" + value + "'"
+
+
+def ensure_postgres_names_are_available(database_name: str, username: str) -> None:
+    query = (
+        "SELECT 'database' FROM pg_database WHERE datname = "
+        + postgres_string(database_name)
+        + ";\nSELECT 'role' FROM pg_roles WHERE rolname = "
+        + postgres_string(username)
+        + ";\n"
+    )
+    if run_postgres_admin_sql(query, "POSTGRESQL_UNAVAILABLE"):
+        raise HelperError("DATABASE_EXISTS")
+
+
+def verify_postgres_application_connection(database_name: str, username: str, password: str) -> None:
+    descriptor = -1
+    passfile: Path | None = None
+    try:
+        descriptor, name = tempfile.mkstemp(prefix="laravel-manager-postgres-", suffix=".pgpass")
+        passfile = Path(name)
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            descriptor = -1
+            stream.write(f"127.0.0.1:5432:{database_name}:{username}:{password}\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+
+        try:
+            result = subprocess.run(
+                [
+                    PSQL,
+                    "--no-psqlrc",
+                    "--no-password",
+                    "--host=127.0.0.1",
+                    "--port=5432",
+                    f"--username={username}",
+                    f"--dbname={database_name}",
+                    "--tuples-only",
+                    "--no-align",
+                    "--command=SELECT 1",
+                ],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                encoding="utf-8",
+                timeout=10,
+                env={**postgres_environment(), "PGPASSFILE": str(passfile)},
+            )
+        except (OSError, subprocess.TimeoutExpired, UnicodeError) as error:
+            raise HelperError("PROVISION_FAILED") from error
+
+        if result.returncode != 0 or result.stdout.strip() != "1":
+            raise HelperError("PROVISION_FAILED")
+    except OSError as error:
+        raise HelperError("PROVISION_FAILED") from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if passfile is not None:
+            try:
+                passfile.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def rollback_postgres(database_name: str, username: str, database_created: bool, role_created: bool) -> bool:
+    statements = []
+    if database_created:
+        statements.append(f"DROP DATABASE IF EXISTS {postgres_identifier(database_name)};")
+    if role_created:
+        statements.append(f"DROP ROLE IF EXISTS {postgres_identifier(username)};")
+
+    if not statements:
+        return True
+
+    try:
+        run_postgres_admin_sql("\n".join(statements) + "\n", "CLEANUP_REQUIRED")
+        return True
+    except HelperError:
+        return False
+
+
+def provision_mysql(slug: str) -> None:
     validate_slug(slug)
     database_name, username = project_database_names(slug)
     database_identifier = sql_identifier(database_name)
     username_sql = sql_string(username)
-    directory_descriptor, original_contents, original_stat = project_environment(slug)
+    directory_descriptor, original_contents, original_stat = project_environment(slug, "MYSQL_UNAVAILABLE")
     try:
         socket_path = run_admin_sql("SELECT @@socket;\n", "MYSQL_UNAVAILABLE")
         if not re.fullmatch(r"/[A-Za-z0-9._/-]{1,254}", socket_path):
             raise HelperError("MYSQL_UNAVAILABLE")
 
-        require_env_is_ignored(slug)
+        require_env_is_ignored(slug, "MYSQL_UNAVAILABLE")
         ensure_database_names_are_available(database_name, username)
 
         database_created = False
@@ -439,15 +577,88 @@ def provision(slug: str) -> None:
         os.close(directory_descriptor)
 
 
+def provision_postgresql(slug: str) -> None:
+    validate_slug(slug)
+    database_name, username = project_database_names(slug)
+    database_identifier = postgres_identifier(database_name)
+    username_identifier = postgres_identifier(username)
+    directory_descriptor, original_contents, original_stat = project_environment(slug, "POSTGRESQL_UNAVAILABLE")
+
+    try:
+        require_env_is_ignored(slug, "POSTGRESQL_UNAVAILABLE")
+        ensure_postgres_names_are_available(database_name, username)
+
+        role_created = False
+        database_created = False
+        environment_write_attempted = False
+        try:
+            password = secrets.token_hex(32)
+            run_postgres_admin_sql(
+                "CREATE ROLE " + username_identifier
+                + " WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT PASSWORD "
+                + postgres_string(password)
+                + ";\n",
+                "PROVISION_FAILED",
+            )
+            role_created = True
+
+            run_postgres_admin_sql(
+                f"CREATE DATABASE {database_identifier} OWNER {username_identifier} ENCODING 'UTF8';\n",
+                "PROVISION_FAILED",
+            )
+            database_created = True
+            run_postgres_admin_sql(
+                f"REVOKE ALL ON DATABASE {database_identifier} FROM PUBLIC;\n"
+                f"GRANT ALL PRIVILEGES ON DATABASE {database_identifier} TO {username_identifier};\n",
+                "PROVISION_FAILED",
+            )
+
+            environment = update_environment(original_contents, {
+                "DB_CONNECTION": "pgsql",
+                "DB_URL": "null",
+                "DB_HOST": "127.0.0.1",
+                "DB_PORT": "5432",
+                "DB_SOCKET": "null",
+                "DB_DATABASE": database_name,
+                "DB_USERNAME": username,
+                "DB_PASSWORD": password,
+            })
+            environment_write_attempted = True
+            atomic_write_environment(directory_descriptor, environment, original_stat)
+            verify_postgres_application_connection(database_name, username, password)
+        except HelperError as error:
+            environment_restore_failed = False
+            if environment_write_attempted:
+                try:
+                    atomic_write_environment(directory_descriptor, original_contents, original_stat)
+                except HelperError:
+                    environment_restore_failed = True
+
+            if environment_restore_failed or not rollback_postgres(database_name, username, database_created, role_created):
+                raise HelperError("CLEANUP_REQUIRED") from error
+
+            raise
+    finally:
+        os.close(directory_descriptor)
+
+
 def main(arguments: list[str]) -> int:
-    if len(arguments) != 2 or arguments[0] != "provision":
-        print("Usage: laravel-manager-database provision <slug>", file=sys.stderr)
+    if len(arguments) != 3 or arguments[0] != "provision":
+        print("Usage: laravel-manager-database provision <slug> <mysql|pgsql>", file=sys.stderr)
         return 2
 
     try:
         validate_slug(arguments[1])
-        require_root()
-        provision(arguments[1])
+        engine = arguments[2]
+        if engine not in {"mysql", "pgsql"}:
+            raise HelperError("INVALID_PROJECT")
+
+        unavailable_code = "MYSQL_UNAVAILABLE" if engine == "mysql" else "POSTGRESQL_UNAVAILABLE"
+        require_root(unavailable_code)
+        if engine == "mysql":
+            provision_mysql(arguments[1])
+        else:
+            provision_postgresql(arguments[1])
         print("READY")
         return 0
     except HelperError as error:

@@ -26,7 +26,7 @@ beforeEach(function () {
     File::makeDirectory($this->projectPath.'/.git', 0755, true);
     File::put($this->projectPath.'/.git/config', "[remote \"origin\"]\n\turl = https://github.com/octocat/customer-portal.git\n");
     File::put($this->projectPath.'/.gitignore', ".env\n/vendor\n/node_modules\n");
-    File::put($this->projectPath.'/.env', "APP_KEY=base64:deploy-key-value\nDB_PASSWORD=deploy-password\n");
+    File::put($this->projectPath.'/.env', "APP_KEY=base64:deploy-key-value\nDB_PASSWORD=deploy-password\nDB_URL=mysql://deploy:db-url-password@localhost/customer\n");
     File::put($this->projectPath.'/artisan', "<?php\n");
     File::put($this->projectPath.'/composer.json', '{}');
     File::put($this->projectPath.'/composer.lock', '{}');
@@ -48,6 +48,7 @@ beforeEach(function () {
         'repository_url' => 'https://github.com/octocat/customer-portal',
         'repository_name' => 'octocat/customer-portal',
         'branch' => 'main',
+        'php_version' => '8.2',
         'status' => ProjectStatus::Active,
         'database_status' => DatabaseStatus::Active,
     ]);
@@ -141,12 +142,12 @@ it('deploys the configured branch and stores its current commit', function () {
 
     Process::assertRan(['git', 'fetch', '--no-tags', 'origin', 'refs/heads/main:refs/remotes/origin/main']);
     Process::assertRan(['git', 'checkout', '--force', '--detach', $commit]);
-    Process::assertRan(['composer', 'install', '--no-dev', '--no-interaction', '--prefer-dist', '--optimize-autoloader']);
+    Process::assertRan(['/usr/bin/php8.2', '/usr/local/bin/composer', 'install', '--no-dev', '--no-interaction', '--prefer-dist', '--optimize-autoloader']);
     Process::assertRan(['npm', 'ci', '--no-audit', '--no-fund']);
     Process::assertRan(['npm', 'run', 'build']);
-    Process::assertRan(['php', 'artisan', 'migrate', '--force']);
-    Process::assertRan(['php', 'artisan', 'optimize']);
-    Process::assertRan(['php', 'artisan', 'queue:restart']);
+    Process::assertRan(['/usr/bin/php8.2', 'artisan', 'migrate', '--force']);
+    Process::assertRan(['/usr/bin/php8.2', 'artisan', 'optimize']);
+    Process::assertRan(['/usr/bin/php8.2', 'artisan', 'queue:restart']);
     Process::assertRan(function (PendingProcess $process): bool {
         return ($process->command[1] ?? null) === 'fetch'
             && ! str_contains(implode(' ', $process->command), 'gho_deploy_test_token')
@@ -239,7 +240,7 @@ it('records failed deployments and redacts GitHub and application secrets from o
 
         if (($process->command[1] ?? null) === 'fetch') {
             return Process::result(
-                errorOutput: "gho_deploy_test_token\nAuthorization: basic {$authorization}\nAPP_KEY=base64:deploy-key-value\nDB_PASSWORD=deploy-password",
+                errorOutput: "gho_deploy_test_token\nAuthorization: basic {$authorization}\nAPP_KEY=base64:deploy-key-value\nDB_PASSWORD=deploy-password\nDB_URL=mysql://deploy:db-url-password@localhost/customer",
                 exitCode: 1,
             );
         }
@@ -253,7 +254,7 @@ it('records failed deployments and redacts GitHub and application secrets from o
     expect($deployment->status)->toBe(DeploymentStatus::Failed)
         ->and($deployment->finished_at)->not->toBeNull()
         ->and($deployment->output)->toContain('Fetching main failed.', 'Authorization: basic [redacted]')
-        ->and($deployment->output)->not->toContain('gho_deploy_test_token', $authorization, 'deploy-key-value', 'deploy-password');
+        ->and($deployment->output)->not->toContain('gho_deploy_test_token', $authorization, 'deploy-key-value', 'deploy-password', 'db-url-password', 'mysql://deploy:db-url-password@localhost/customer');
 });
 
 it('does not run processes when the project path escapes the configured applications directory', function () {
@@ -303,7 +304,7 @@ it('refuses a fetched commit that contains a tracked application environment fil
         ->and(File::get($this->projectPath.'/.env'))->toBe($originalEnvironment);
 
     Process::assertNotRan(fn (PendingProcess $process): bool => ($process->command[1] ?? null) === 'checkout');
-    Process::assertNotRan(fn (PendingProcess $process): bool => ($process->command[0] ?? null) === 'composer');
+    Process::assertNotRan(fn (PendingProcess $process): bool => in_array('/usr/local/bin/composer', $process->command, true));
 });
 
 it('rechecks that the checked out branch ignores .env before installing dependencies', function () {
@@ -342,7 +343,7 @@ it('rechecks that the checked out branch ignores .env before installing dependen
         ->and($deployment->fresh()->output)->toContain('Checking .env Git ignore rule failed.');
 
     Process::assertRan(['git', 'checkout', '--force', '--detach', $commit]);
-    Process::assertNotRan(fn (PendingProcess $process): bool => ($process->command[0] ?? null) === 'composer');
+    Process::assertNotRan(fn (PendingProcess $process): bool => in_array('/usr/local/bin/composer', $process->command, true));
 });
 
 it('fails a queued deployment without starting it when another deployment already runs', function () {

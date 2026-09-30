@@ -74,6 +74,7 @@ it('lets an administrator provision a project database without displaying its pa
             '/usr/local/sbin/laravel-manager-database',
             'provision',
             'customer',
+            'mysql',
         ] && $process->timeout === 120;
     });
 });
@@ -89,6 +90,54 @@ it('records database failures without exposing helper diagnostics', function () 
         ->assertDontSee('show-this-password');
 
     expect($this->project->fresh()->database_status)->toBe(DatabaseStatus::Failed);
+});
+
+it('provisions PostgreSQL for projects that selected it', function () {
+    $this->project->update(['database_engine' => 'pgsql']);
+    $projectPath = $this->projectPath;
+
+    Process::preventStrayProcesses();
+    Process::fake(function (PendingProcess $process) use ($projectPath) {
+        if (($process->command[0] ?? null) === '/usr/bin/sudo') {
+            File::put($projectPath.'/.env', "DB_CONNECTION=pgsql\nDB_DATABASE=lm_customer_b6c45863\nDB_USERNAME=lm_customer_b6c45863\nDB_PASSWORD=show-this-password\n");
+
+            return Process::result(output: 'READY');
+        }
+
+        return Process::result();
+    });
+
+    Livewire::actingAs($this->admin)
+        ->test(Show::class, ['project' => $this->project])
+        ->call('provisionDatabase')
+        ->assertHasNoErrors()
+        ->assertSee('PostgreSQL')
+        ->assertSee('Database is ready.')
+        ->assertDontSee('show-this-password');
+
+    expect($this->project->fresh()->database_status)->toBe(DatabaseStatus::Active)
+        ->and(File::get($this->projectPath.'/.env'))->toContain('DB_CONNECTION=pgsql');
+
+    Process::assertRan([
+        '/usr/bin/sudo',
+        '-n',
+        '/usr/local/sbin/laravel-manager-database',
+        'provision',
+        'customer',
+        'pgsql',
+    ]);
+});
+
+it('shows the selected database engine in database failures without exposing secrets', function () {
+    $this->project->update(['database_engine' => 'pgsql']);
+    Process::preventStrayProcesses();
+    Process::fake(['*' => Process::result(errorOutput: 'ERROR: POSTGRESQL_UNAVAILABLE', exitCode: 1)]);
+
+    Livewire::actingAs($this->admin)
+        ->test(Show::class, ['project' => $this->project])
+        ->call('provisionDatabase')
+        ->assertSee('PostgreSQL is not available. Start the PostgreSQL service, then retry.')
+        ->assertDontSee('password');
 });
 
 it('shows a safe recovery message for known MySQL setup failures', function () {
@@ -150,9 +199,31 @@ it('rejects shell metacharacters at the database helper command boundary', funct
         base_path('scripts/laravel-manager-database'),
         'provision',
         'customer;touch-pwned',
+        'mysql',
     ]);
     $process->run();
 
     expect($process->isSuccessful())->toBeFalse()
         ->and($process->getErrorOutput())->toContain('ERROR: INVALID_PROJECT');
+});
+
+it('rejects database engine names outside the fixed helper allowlist', function () {
+    $process = new SymfonyProcess([
+        'python3',
+        base_path('scripts/laravel-manager-database'),
+        'provision',
+        'customer',
+        'sqlite',
+    ]);
+    $process->run();
+
+    expect($process->isSuccessful())->toBeFalse()
+        ->and($process->getErrorOutput())->toContain('ERROR: INVALID_PROJECT');
+});
+
+it('limits database sudo access to MySQL and PostgreSQL helper arguments', function () {
+    $sudoers = file_get_contents(base_path('scripts/laravel-manager-database.sudoers'));
+
+    expect($sudoers)->toContain('^provision [a-z0-9]', '(mysql|pgsql)$')
+        ->and($sudoers)->not->toContain('ALL,', '/bin/sh', 'mysql ', 'psql ');
 });

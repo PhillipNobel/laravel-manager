@@ -2,8 +2,10 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Model;
 
+#[Hidden(['access_token'])]
 class GitHubConnection extends Model
 {
     protected $table = 'github_connections';

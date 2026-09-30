@@ -49,6 +49,7 @@ class DeployProject implements ShouldQueue
         try {
             $project = $deployment->project;
             $path = $this->projectPath($project);
+            $phpBinary = $this->phpBinary($project);
             $connection = GitHubConnection::query()->first();
 
             if (! $connection) {
@@ -115,16 +116,16 @@ class DeployProject implements ShouldQueue
             $this->runCommand(
                 'Installing Composer dependencies',
                 $path,
-                ['composer', 'install', '--no-dev', '--no-interaction', '--prefer-dist', '--optimize-autoloader'],
+                [$phpBinary, '/usr/local/bin/composer', 'install', '--no-dev', '--no-interaction', '--prefer-dist', '--optimize-autoloader'],
                 900,
             );
 
             $this->installFrontendDependencies($path);
 
-            $this->runCommand('Clearing Laravel caches', $path, ['php', 'artisan', 'optimize:clear'], 180);
-            $this->runCommand('Running database migrations', $path, ['php', 'artisan', 'migrate', '--force'], 300);
-            $this->runCommand('Optimizing Laravel application', $path, ['php', 'artisan', 'optimize'], 180);
-            $this->runCommand('Restarting Laravel queue workers', $path, ['php', 'artisan', 'queue:restart'], 180);
+            $this->runCommand('Clearing Laravel caches', $path, [$phpBinary, 'artisan', 'optimize:clear'], 180);
+            $this->runCommand('Running database migrations', $path, [$phpBinary, 'artisan', 'migrate', '--force'], 300);
+            $this->runCommand('Optimizing Laravel application', $path, [$phpBinary, 'artisan', 'optimize'], 180);
+            $this->runCommand('Restarting Laravel queue workers', $path, [$phpBinary, 'artisan', 'queue:restart'], 180);
             $this->checkApplicationResponse($project);
 
             $this->appendLog('Deployment completed successfully.');
@@ -224,6 +225,17 @@ class DeployProject implements ShouldQueue
         $this->assertRequiredFiles($realPath);
 
         return $realPath;
+    }
+
+    private function phpBinary(Project $project): string
+    {
+        $version = $project->php_version ?: '8.3';
+
+        if (! in_array($version, config('manager.php_versions'), true)) {
+            throw new RuntimeException('The configured PHP version is not supported.');
+        }
+
+        return '/usr/bin/php'.$version;
     }
 
     private function assertRequiredFiles(string $path): void
@@ -413,7 +425,7 @@ class DeployProject implements ShouldQueue
         if (is_file($environmentPath) && ! is_link($environmentPath)) {
             foreach (file($environmentPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
                 if (! preg_match('/\A\s*([A-Z0-9_]+)\s*=\s*(.*)\z/i', $line, $matches)
-                    || ! preg_match('/PASSWORD|TOKEN|SECRET|KEY/i', $matches[1])) {
+                    || ! preg_match('/PASSWORD|TOKEN|SECRET|KEY|URL|DSN|CREDENTIAL/i', $matches[1])) {
                     continue;
                 }
 
@@ -426,7 +438,7 @@ class DeployProject implements ShouldQueue
 
         $output = preg_replace('/authorization:\s*basic\s+[A-Za-z0-9+\/=]+/i', 'Authorization: basic [redacted]', $output) ?? '';
         $output = preg_replace('~(https?://)[^/@\s]+:[^/@\s]+@~i', '$1[redacted]@', $output) ?? '';
-        $output = preg_replace('/(?im)^([A-Z0-9_]*(?:PASSWORD|TOKEN|SECRET|KEY)[A-Z0-9_]*)=.*$/', '$1=[redacted]', $output) ?? '';
+        $output = preg_replace('/(?im)^([A-Z0-9_]*(?:PASSWORD|TOKEN|SECRET|KEY|URL|DSN|CREDENTIAL)[A-Z0-9_]*)=.*$/', '$1=[redacted]', $output) ?? '';
         $output = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $output) ?? '';
 
         return mb_substr(trim($output), 0, self::MAX_PROCESS_OUTPUT_LENGTH);

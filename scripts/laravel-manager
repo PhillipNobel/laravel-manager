@@ -1,0 +1,406 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+readonly APP_DIR='/opt/laravel-manager'
+readonly PHP_BIN='/usr/bin/php8.3'
+readonly COMPOSER_BIN='/usr/local/bin/composer'
+readonly CLI_PATH='/usr/local/bin/laravel-manager'
+readonly CACHE_DIR='/var/cache/laravel-manager'
+readonly FRONTEND_CACHE="$CACHE_DIR/npm"
+readonly COMPOSER_CACHE="$CACHE_DIR/composer"
+readonly UPDATE_MARKER='/var/lib/laravel-manager/update-incomplete'
+readonly QUEUE_SERVICE='laravel-manager-queue.service'
+readonly MANAGER_PHP_SERVICE='php8.3-fpm.service'
+readonly SUPPORTED_PHP_SERVICES=(php8.2-fpm.service php8.3-fpm.service php8.4-fpm.service)
+readonly WEB_SERVICES=(apache2.service)
+
+ACTIVE_EXTRA_PHP_SERVICES=()
+UPDATE_TMP=''
+MAINTENANCE_ENABLED=0
+SERVICES_STOPPED=0
+VENDOR_WRITABLE=0
+BUILD_BACKUP=0
+BUILD_INSTALLED=0
+
+fail() {
+    printf 'ERROR: %s\n' "$1" >&2
+    exit 1
+}
+
+run_as_manager() {
+    /usr/sbin/runuser -u www-data -- /usr/bin/env -i -C "$APP_DIR" \
+        HOME=/var/www \
+        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+        COMPOSER_HOME="$COMPOSER_CACHE" \
+        npm_config_cache="$FRONTEND_CACHE" \
+        GIT_CONFIG_GLOBAL=/dev/null \
+        GIT_CONFIG_NOSYSTEM=1 \
+        GIT_CONFIG_COUNT=1 \
+        GIT_CONFIG_KEY_0=safe.directory \
+        GIT_CONFIG_VALUE_0="$APP_DIR" \
+        "$@"
+}
+
+run_artisan() {
+    run_as_manager "$PHP_BIN" "$APP_DIR/artisan" "$@"
+}
+
+run_git() {
+    /usr/bin/env -i \
+        PATH=/usr/bin:/bin \
+        GIT_CONFIG_GLOBAL=/dev/null \
+        GIT_CONFIG_NOSYSTEM=1 \
+        GIT_TERMINAL_PROMPT=0 \
+        /usr/bin/git -c safe.directory="$APP_DIR" -C "$APP_DIR" "$@"
+}
+
+restore_tracked_executable_modes() {
+    local index_entry path mode object stage working_object
+    while IFS=$'\t' read -r index_entry path; do
+        read -r mode object stage <<< "$index_entry"
+        [[ "$mode" == '100755' ]] || continue
+        [[ -f "$APP_DIR/$path" && ! -L "$APP_DIR/$path" ]] || continue
+
+        working_object=$(run_git hash-object -- "$path") || continue
+        [[ "$working_object" == "$object" ]] || continue
+        [[ -x "$APP_DIR/$path" ]] || /bin/chmod 0750 -- "$APP_DIR/$path"
+    done < <(run_git ls-files --stage)
+}
+
+version() {
+    [[ "$EUID" -eq 0 ]] || fail 'Run the version command as root: sudo laravel-manager version.'
+    [[ -d "$APP_DIR/.git" && ! -L "$APP_DIR/.git" ]] \
+        || fail 'Laravel Manager Git checkout was not found at /opt/laravel-manager.'
+
+    local current_version
+    current_version=$(run_git describe --tags --always --dirty) \
+        || fail 'Could not read the installed Laravel Manager version.'
+
+    printf 'Laravel Manager %s\n' "$current_version"
+}
+
+restore_vendor_permissions() {
+    if [[ -d "$APP_DIR/vendor" && ! -L "$APP_DIR/vendor" ]]; then
+        /usr/bin/chown -R root:www-data -- "$APP_DIR/vendor"
+        /usr/bin/find "$APP_DIR/vendor" -type d -exec /bin/chmod 0750 {} +
+        /usr/bin/find "$APP_DIR/vendor" -type f -exec /bin/chmod 0640 {} +
+    fi
+
+    VENDOR_WRITABLE=0
+}
+
+validate_update_marker() {
+    local -a marker_lines=()
+    mapfile -t marker_lines < "$UPDATE_MARKER"
+    [[ "${#marker_lines[@]}" -ge 1 && "${#marker_lines[@]}" -le 3 ]] \
+        || fail 'The interrupted update marker contents are invalid.'
+    [[ "${marker_lines[0]}" =~ ^[a-f0-9]{40}$ ]] \
+        || fail 'The interrupted update marker commit is invalid.'
+
+    local service
+    for service in "${marker_lines[@]:1}"; do
+        case "$service" in
+            php8.2-fpm.service|php8.4-fpm.service) ;;
+            *) fail 'The interrupted update marker service list is invalid.' ;;
+        esac
+    done
+}
+
+load_update_marker_services() {
+    local -a marker_lines=()
+    mapfile -t marker_lines < "$UPDATE_MARKER"
+    ACTIVE_EXTRA_PHP_SERVICES=("${marker_lines[@]:1}")
+}
+
+cleanup() {
+    local status=$?
+    trap - EXIT
+
+    if [[ "$VENDOR_WRITABLE" -eq 1 ]]; then
+        restore_vendor_permissions || true
+    fi
+
+    if [[ "$BUILD_BACKUP" -eq 1 && "$BUILD_INSTALLED" -eq 0 \
+        && ! -e "$APP_DIR/public/build" && -d "$APP_DIR/public/build.previous" ]]; then
+        /bin/mv -- "$APP_DIR/public/build.previous" "$APP_DIR/public/build" || true
+    fi
+    if [[ -d "$APP_DIR/public/build.next" && ! -L "$APP_DIR/public/build.next" ]]; then
+        /bin/rm -rf -- "$APP_DIR/public/build.next"
+    fi
+
+    if [[ -n "$UPDATE_TMP" && "$UPDATE_TMP" == "$CACHE_DIR"/manager-update.* \
+        && -d "$UPDATE_TMP" ]]; then
+        /bin/rm -rf -- "$UPDATE_TMP"
+    fi
+
+    if [[ "$MAINTENANCE_ENABLED" -eq 1 ]]; then
+        if run_artisan up; then
+            MAINTENANCE_ENABLED=0
+        else
+            printf 'Recovery required: Laravel Manager may still be in maintenance mode. Run `sudo -u www-data /usr/bin/php8.3 /opt/laravel-manager/artisan up` after fixing the reported error.\n' >&2
+        fi
+    fi
+
+    if [[ "$SERVICES_STOPPED" -eq 1 ]]; then
+        /usr/bin/systemctl start \
+            "$MANAGER_PHP_SERVICE" \
+            "${ACTIVE_EXTRA_PHP_SERVICES[@]}" \
+            "${WEB_SERVICES[@]}" \
+            "$QUEUE_SERVICE" || true
+    fi
+
+    exit "$status"
+}
+
+validate_installation() {
+    [[ "$EUID" -eq 0 ]] || fail 'Run updates as root: sudo laravel-manager update.'
+    [[ -r /etc/os-release ]] || fail 'Cannot identify the operating system.'
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    [[ "${ID:-}" == 'ubuntu' && "${VERSION_ID:-}" == '24.04' ]] \
+        || fail 'Laravel Manager updates support Ubuntu 24.04 only.'
+
+    [[ -d "$APP_DIR" && ! -L "$APP_DIR" ]] \
+        || fail 'Laravel Manager must be installed at /opt/laravel-manager.'
+    [[ -d "$APP_DIR/.git" && ! -L "$APP_DIR/.git" ]] \
+        || fail 'Laravel Manager Git checkout was not found.'
+    [[ -d /var/lib/laravel-manager && ! -L /var/lib/laravel-manager ]] \
+        || fail 'Laravel Manager installation state directory is missing or unsafe.'
+    [[ "$(/usr/bin/stat -c '%U:%G:%a' /var/lib/laravel-manager)" == 'root:root:755' ]] \
+        || fail 'Laravel Manager installation state directory ownership or permissions changed.'
+    [[ -f /var/lib/laravel-manager/installed && ! -L /var/lib/laravel-manager/installed ]] \
+        || fail 'Laravel Manager installation marker is missing or unsafe.'
+    [[ "$(/usr/bin/stat -c '%U:%G:%a' /var/lib/laravel-manager/installed)" == 'root:root:644' ]] \
+        || fail 'Laravel Manager installation marker ownership or permissions changed.'
+    if [[ -e "$UPDATE_MARKER" ]]; then
+        [[ -f "$UPDATE_MARKER" && ! -L "$UPDATE_MARKER" ]] \
+            || fail 'The interrupted update marker is unsafe.'
+        [[ "$(/usr/bin/stat -c '%U:%G:%a' "$UPDATE_MARKER")" == 'root:root:600' ]] \
+            || fail 'The interrupted update marker ownership or permissions changed.'
+        validate_update_marker
+    fi
+    local interrupted_update=0
+    [[ -e "$UPDATE_MARKER" ]] && interrupted_update=1
+    [[ -f "$APP_DIR/.env" && ! -L "$APP_DIR/.env" ]] \
+        || fail 'The production .env file is missing or unsafe.'
+    [[ -f "$APP_DIR/composer.lock" && -f "$APP_DIR/package-lock.json" ]] \
+        || fail 'The dependency lock files are missing.'
+    [[ -d "$APP_DIR/vendor" && ! -L "$APP_DIR/vendor" ]] \
+        || fail 'The Composer vendor directory is missing or unsafe.'
+    [[ -d "$APP_DIR/public/build" && ! -L "$APP_DIR/public/build" ]] \
+        || fail 'The current frontend build directory is missing or unsafe.'
+    [[ ! -e "$APP_DIR/public/build.previous" && ! -e "$APP_DIR/public/build.next" ]] \
+        || fail 'A previous frontend update needs administrator review before retrying.'
+
+    [[ "$(/usr/bin/stat -c '%U:%G:%a' "$APP_DIR")" == 'root:www-data:750' ]] \
+        || fail 'The Laravel Manager source directory ownership or permissions changed.'
+    [[ "$(/usr/bin/stat -c '%U:%G:%a' "$APP_DIR/.env")" == 'root:www-data:640' ]] \
+        || fail 'The production .env ownership or permissions changed.'
+    [[ "$(/usr/bin/stat -c '%U:%G:%a' "$APP_DIR/vendor")" == 'root:www-data:750' ]] \
+        || fail 'The Composer vendor directory ownership or permissions changed.'
+
+    local remote_url
+    remote_url=$(run_git remote get-url origin) \
+        || fail 'The Manager Git origin is missing.'
+    [[ "$remote_url" =~ ^https://github\.com/[A-Za-z0-9]([A-Za-z0-9-]{0,38}[A-Za-z0-9])?/[A-Za-z0-9]([A-Za-z0-9._-]{0,98}[A-Za-z0-9])?(\.git)?$ ]] \
+        || fail 'The Manager Git origin must be a public HTTPS GitHub repository without credentials.'
+
+    local branch
+    branch=$(run_git branch --show-current)
+    [[ -n "$branch" ]] \
+        || fail 'The Manager checkout is detached. Check out its installed update branch before retrying.'
+    [[ "$branch" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] \
+        && run_git check-ref-format --branch "$branch" >/dev/null \
+        || fail 'The Manager update branch name is invalid.'
+
+    restore_tracked_executable_modes
+
+    local working_tree
+    working_tree=$(run_git status --porcelain --untracked-files=all)
+    [[ -z "$working_tree" ]] \
+        || fail 'The Manager checkout has local changes. Review and commit or remove them before updating.'
+
+    local service
+    /usr/bin/systemctl is-active --quiet mysql.service \
+        || fail 'Required service is not active: mysql.service. Start it before updating.'
+    if [[ "$interrupted_update" -eq 0 ]]; then
+        for service in "$MANAGER_PHP_SERVICE" "${WEB_SERVICES[@]}" "$QUEUE_SERVICE"; do
+            /usr/bin/systemctl is-active --quiet "$service" \
+                || fail "Required service is not active: $service. Start it before updating."
+        done
+    fi
+
+    [[ -x "$PHP_BIN" && -x "$COMPOSER_BIN" && -x /usr/bin/npm && -x /usr/bin/node ]] \
+        || fail 'PHP 8.3, Composer, Node.js, and npm must be installed.'
+    [[ -x /usr/bin/flock ]] || fail 'The flock utility is required to lock updates.'
+    [[ -x /usr/sbin/runuser && -d "$COMPOSER_CACHE" && -d "$FRONTEND_CACHE" ]] \
+        || fail 'The Manager Composer/npm runtime cache directories are missing.'
+
+    printf '%s\n' "$branch"
+}
+
+update_manager() {
+    local branch current_commit target_commit
+    branch=$(validate_installation)
+    exec 9>/run/lock/laravel-manager-update.lock
+    /usr/bin/flock -n 9 || fail 'Another Laravel Manager update is already running.'
+
+    local interrupted_update=0
+    [[ -e "$UPDATE_MARKER" ]] && interrupted_update=1
+    if [[ "$interrupted_update" -eq 1 ]]; then
+        load_update_marker_services
+        trap cleanup EXIT
+        MAINTENANCE_ENABLED=1
+        SERVICES_STOPPED=1
+    else
+        local service
+        for service in "${SUPPORTED_PHP_SERVICES[@]}"; do
+            if [[ "$service" != "$MANAGER_PHP_SERVICE" ]] \
+                && /usr/bin/systemctl is-active --quiet "$service"; then
+                ACTIVE_EXTRA_PHP_SERVICES+=("$service")
+            fi
+        done
+    fi
+
+    printf 'Checking GitHub for a Laravel Manager update...\n'
+    run_git fetch --prune --tags origin "$branch"
+    current_commit=$(run_git rev-parse HEAD)
+    target_commit=$(run_git rev-parse FETCH_HEAD)
+
+    if [[ "$current_commit" == "$target_commit" && ! -e "$UPDATE_MARKER" ]]; then
+        printf 'Laravel Manager is already up to date. '
+        version
+        return 0
+    fi
+
+    if [[ "$current_commit" != "$target_commit" ]]; then
+        run_git merge-base --is-ancestor "$current_commit" "$target_commit" \
+            || fail 'The remote update is not a fast-forward. Resolve the Manager Git history manually.'
+    else
+        printf 'Resuming an interrupted update for %s.\n' "$current_commit"
+    fi
+
+    trap cleanup EXIT
+    printf '%s\n' "$target_commit" > "$UPDATE_MARKER"
+    for service in "${ACTIVE_EXTRA_PHP_SERVICES[@]}"; do
+        printf '%s\n' "$service" >> "$UPDATE_MARKER"
+    done
+    /usr/bin/chown root:root "$UPDATE_MARKER"
+    /bin/chmod 0600 "$UPDATE_MARKER"
+    MAINTENANCE_ENABLED=1
+    run_artisan down --retry=60
+
+    SERVICES_STOPPED=1
+    /usr/bin/systemctl stop \
+        "$QUEUE_SERVICE" \
+        "${WEB_SERVICES[@]}" \
+        "$MANAGER_PHP_SERVICE" \
+        "${ACTIVE_EXTRA_PHP_SERVICES[@]}"
+
+    if [[ "$current_commit" != "$target_commit" ]]; then
+        run_git merge --ff-only FETCH_HEAD
+    fi
+
+    VENDOR_WRITABLE=1
+    /usr/bin/chown -R www-data:www-data -- "$APP_DIR/vendor"
+    /usr/bin/find "$APP_DIR/vendor" -type d -exec /bin/chmod 0750 {} +
+    /usr/bin/find "$APP_DIR/vendor" -type f -exec /bin/chmod 0640 {} +
+    run_as_manager "$PHP_BIN" "$COMPOSER_BIN" install \
+        --no-dev --no-interaction --prefer-dist --optimize-autoloader
+    restore_vendor_permissions
+
+    UPDATE_TMP=$(/usr/bin/mktemp -d "$CACHE_DIR"/manager-update.XXXXXX)
+    /usr/bin/chown root:www-data "$UPDATE_TMP"
+    /bin/chmod 0750 "$UPDATE_TMP"
+    /usr/bin/mkdir -p "$UPDATE_TMP/frontend/resources" "$UPDATE_TMP/frontend/public"
+    /usr/bin/chown -R www-data:www-data "$UPDATE_TMP/frontend"
+
+    run_git archive --format=tar HEAD \
+        | /usr/bin/tar -x -C "$UPDATE_TMP/frontend"
+    /usr/bin/chown -R www-data:www-data "$UPDATE_TMP/frontend"
+
+    /usr/bin/ln -s "$APP_DIR/vendor" "$UPDATE_TMP/frontend/vendor"
+    /usr/bin/ln -s "$APP_DIR/storage" "$UPDATE_TMP/frontend/storage"
+    run_as_manager /usr/bin/npm --prefix "$UPDATE_TMP/frontend" ci --no-audit --no-fund
+    run_as_manager /usr/bin/npm --prefix "$UPDATE_TMP/frontend" run build
+
+    [[ -f "$UPDATE_TMP/frontend/public/build/manifest.json" ]] \
+        || fail 'The frontend build did not produce its Vite manifest.'
+    /usr/bin/cp -a "$UPDATE_TMP/frontend/public/build" "$APP_DIR/public/build.next"
+    /usr/bin/chown -R root:www-data "$APP_DIR/public/build.next"
+    /usr/bin/find "$APP_DIR/public/build.next" -type d -exec /bin/chmod 0750 {} +
+    /usr/bin/find "$APP_DIR/public/build.next" -type f -exec /bin/chmod 0640 {} +
+
+    /bin/mv -- "$APP_DIR/public/build" "$APP_DIR/public/build.previous"
+    BUILD_BACKUP=1
+    /bin/mv -- "$APP_DIR/public/build.next" "$APP_DIR/public/build"
+    BUILD_INSTALLED=1
+    /bin/rm -rf -- "$APP_DIR/public/build.previous"
+    BUILD_BACKUP=0
+
+    run_artisan optimize:clear
+    run_artisan migrate --force
+    run_artisan optimize
+
+    if [[ -f "$APP_DIR/scripts/laravel-manager" && ! -L "$APP_DIR/scripts/laravel-manager" ]]; then
+        /usr/bin/install -o root -g root -m 0755 \
+            "$APP_DIR/scripts/laravel-manager" "$CLI_PATH"
+    fi
+
+    run_artisan up
+    MAINTENANCE_ENABLED=0
+
+    /usr/bin/systemctl start \
+        "$MANAGER_PHP_SERVICE" \
+        "${ACTIVE_EXTRA_PHP_SERVICES[@]}" \
+        "${WEB_SERVICES[@]}" \
+        "$QUEUE_SERVICE"
+    SERVICES_STOPPED=0
+
+    if [[ -n "$UPDATE_TMP" && -d "$UPDATE_TMP" ]]; then
+        /bin/rm -rf -- "$UPDATE_TMP"
+        UPDATE_TMP=''
+    fi
+
+    /usr/bin/curl --fail --silent --show-error --max-time 10 \
+        --output /dev/null http://127.0.0.1:8080/login \
+        || fail 'Update finished, but the local Manager login check failed. Review Apache and PHP-FPM logs.'
+
+    /bin/rm -f -- "$UPDATE_MARKER"
+    printf 'Laravel Manager updated successfully. '
+    version
+}
+
+usage() {
+    cat <<'USAGE'
+Usage:
+  sudo laravel-manager version
+  sudo laravel-manager update
+
+The version command is read-only. Updating requires root and a clean installation
+from an HTTPS GitHub repository. The update follows the currently checked-out branch.
+USAGE
+}
+
+main() {
+    [[ "$#" -eq 1 ]] || { usage >&2; exit 2; }
+
+    case "$1" in
+        version)
+            version
+            ;;
+        update)
+            update_manager
+            ;;
+        --help|-h)
+            usage
+            ;;
+        *)
+            usage >&2
+            exit 2
+            ;;
+    esac
+}
+
+main "$@"

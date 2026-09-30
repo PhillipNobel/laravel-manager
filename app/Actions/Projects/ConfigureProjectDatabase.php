@@ -2,6 +2,7 @@
 
 namespace App\Actions\Projects;
 
+use App\Enums\DatabaseEngine;
 use App\Enums\DatabaseStatus;
 use App\Enums\ProjectStatus;
 use App\Models\AppSetting;
@@ -43,6 +44,11 @@ class ConfigureProjectDatabase
             return $this->failed($project, 'The application slug is invalid. Review the project before creating its database.');
         }
 
+        $engine = $project->database_engine;
+        if (! $engine instanceof DatabaseEngine) {
+            return $this->failed($project, 'Choose a supported database engine before creating the application database.');
+        }
+
         $claimed = DB::transaction(function () use ($project, $names): bool {
             $lockedProject = Project::query()->lockForUpdate()->findOrFail($project->id);
 
@@ -72,6 +78,7 @@ class ConfigureProjectDatabase
                 config('manager.database_helper'),
                 'provision',
                 $project->slug,
+                $engine->value,
             ]);
         } catch (Throwable $exception) {
             Log::warning('Project database provisioning failed.', [
@@ -113,7 +120,7 @@ class ConfigureProjectDatabase
 
     private function errorCode(string $output): ?string
     {
-        if (! preg_match('/\AERROR: (MYSQL_UNAVAILABLE|GIT_CHECK_FAILED|ENV_NOT_IGNORED|INVALID_PROJECT|UNSAFE_ENV|DATABASE_EXISTS|PROVISION_FAILED|CLEANUP_REQUIRED)\z/', trim($output), $matches)) {
+        if (! preg_match('/\AERROR: (MYSQL_UNAVAILABLE|POSTGRESQL_UNAVAILABLE|GIT_CHECK_FAILED|ENV_NOT_IGNORED|INVALID_PROJECT|UNSAFE_ENV|DATABASE_EXISTS|PROVISION_FAILED|CLEANUP_REQUIRED)\z/', trim($output), $matches)) {
             return null;
         }
 
@@ -124,13 +131,14 @@ class ConfigureProjectDatabase
     {
         return match ($errorCode) {
             'MYSQL_UNAVAILABLE' => 'Laravel Manager could not access MySQL. Check MySQL and its local socket configuration, then retry.',
+            'POSTGRESQL_UNAVAILABLE' => 'PostgreSQL is not available. Start the PostgreSQL service, then retry.',
             'GIT_CHECK_FAILED' => 'Laravel Manager could not verify that Git ignores the application .env file. Check the repository, then retry.',
             'ENV_NOT_IGNORED' => 'The repository does not ignore its .env file. Add .env to .gitignore before creating a database.',
             'INVALID_PROJECT' => 'The application directory or environment file is missing or unsafe. Restore it before retrying.',
             'UNSAFE_ENV' => 'The application .env file could not be updated securely. Check its ownership and permissions, then retry.',
-            'DATABASE_EXISTS' => 'A database or MySQL user with this name already exists. Have an administrator review it before retrying.',
+            'DATABASE_EXISTS' => 'A database or database account with this name already exists. Have an administrator review it before retrying.',
             'CLEANUP_REQUIRED' => 'Database setup could not be fully rolled back. Have an administrator review MySQL and the app .env before retrying.',
-            'PROVISION_FAILED' => 'MySQL could not create or verify the application database connection. Check the Laravel Manager log, then retry.',
+            'PROVISION_FAILED' => 'The database engine could not create or verify the application database connection. Check the Laravel Manager log, then retry.',
             default => 'The database could not be created. Check the Laravel Manager log, then retry.',
         };
     }

@@ -2,17 +2,11 @@
 name: Laravel Manager
 description: A restrained, single-server Laravel control room.
 colors:
-  clay-primary: "hsl(28 38% 74%)"
-  clay-ink: "hsl(28 38% 16%)"
-  moss-background: "hsl(105 20% 93%)"
-  forest-ink: "hsl(145 18% 13%)"
-  card-paper: "hsl(95 14% 97%)"
-  moss-muted: "hsl(100 15% 87%)"
-  muted-copy: "hsl(145 8% 36%)"
-  moss-border: "hsl(100 10% 79%)"
-  warm-hover: "hsl(30 20% 86%)"
-  sidebar-moss: "hsl(100 16% 89%)"
-  sidebar-selected: "hsl(100 15% 84%)"
+  slate-ink: "#495464"
+  paper-canvas: "#F4F4F2"
+  soft-gray: "#E8E8E8"
+  blue-gray: "#BBBFCA"
+  control-outline: "hsl(224 12.4% 54%)"
   error-red: "hsl(0 72.22% 50.59%)"
   error-foreground: "hsl(0 0% 98%)"
 typography:
@@ -60,45 +54,45 @@ spacing:
   xl: "32px"
 components:
   button-primary:
-    backgroundColor: "{colors.clay-primary}"
-    textColor: "{colors.clay-ink}"
+    backgroundColor: "{colors.slate-ink}"
+    textColor: "{colors.paper-canvas}"
     typography: "{typography.label}"
     rounded: "{rounded.md}"
     padding: "8px 16px"
     height: "40px"
   button-outline:
-    backgroundColor: "{colors.moss-background}"
-    textColor: "{colors.forest-ink}"
+    backgroundColor: "{colors.paper-canvas}"
+    textColor: "{colors.slate-ink}"
     typography: "{typography.label}"
     rounded: "{rounded.md}"
     padding: "8px 16px"
     height: "40px"
   text-field:
-    backgroundColor: "{colors.moss-background}"
-    textColor: "{colors.forest-ink}"
+    backgroundColor: "{colors.paper-canvas}"
+    textColor: "{colors.slate-ink}"
     typography: "{typography.body}"
     rounded: "{rounded.md}"
     padding: "8px 12px"
     height: "40px"
   status-outline:
-    backgroundColor: "{colors.moss-background}"
-    textColor: "{colors.forest-ink}"
+    backgroundColor: "{colors.soft-gray}"
+    textColor: "{colors.slate-ink}"
     typography: "{typography.metadata}"
     rounded: "{rounded.full}"
     padding: "2px 10px"
   sidebar-link-active:
-    backgroundColor: "{colors.sidebar-selected}"
-    textColor: "{colors.forest-ink}"
+    backgroundColor: "{colors.slate-ink}"
+    textColor: "{colors.paper-canvas}"
     rounded: "{rounded.md}"
     padding: "4px 8px"
   app-card:
-    backgroundColor: "{colors.card-paper}"
-    textColor: "{colors.forest-ink}"
+    backgroundColor: "{colors.paper-canvas}"
+    textColor: "{colors.slate-ink}"
     rounded: "{rounded.lg}"
     padding: "16px"
   domain-preview:
-    backgroundColor: "{colors.moss-muted}"
-    textColor: "{colors.forest-ink}"
+    backgroundColor: "{colors.soft-gray}"
+    textColor: "{colors.slate-ink}"
     typography: "{typography.technical}"
     rounded: "{rounded.md}"
     padding: "8px 12px"
@@ -110,35 +104,32 @@ components:
 
 **Creative North Star: "The Single-Server Control Room"**
 
-Laravel Manager adapts April UI v1.3 into a restrained operating surface for managing Laravel applications on one server. Moss-tinted surfaces, a soft clay action color, crisp line icons, and clear border rules keep attention on app identity, status, domains, branches, PHP versions, and server settings. System sans carries interface text; monospace marks technical values an operator checks or copies.
+Laravel Manager adapts April UI v1.3 into a restrained operating surface for managing Laravel applications on one server. Paper and cool-gray surfaces, blue-gray separators, and slate actions keep attention on app identity, status, domains, branches, PHP versions, and server settings. System sans carries interface text; monospace marks technical values an operator checks or copies.
 
 At desktop sizes, the April sidebar anchors Apps, Server, and Settings navigation while each page uses a focused heading and action area above a compact list or form. At narrow widths, navigation opens as a slide-in panel, app rows become cards, environment details stack into one column, and form actions stack. Surface tints and borders provide depth without prominent shadows.
 
 **Key Characteristics:**
-- Moss neutrals establish the broad canvas and sidebar.
-- Warm clay is reserved for the primary action and compact product mark.
+- Paper and cool gray establish the canvas, surfaces, and sidebar.
+- Slate carries primary actions, selected navigation, focus, and the compact product mark.
+- Blue gray defines secondary borders and dividers.
 - Compact system sans typography carries labels and operational details.
 - Technical values use monospace; surfaces stay flat and border-led.
 
 ## Colors
 
-The palette uses one warm clay accent within a broad, low-contrast moss-neutral range; red is reserved for destructive and error states.
+The palette pairs warm off-white paper with cool gray surfaces, blue-gray lines, and dark slate; red remains reserved for destructive and error states.
 
 ### Primary
-- **Soft Clay**: The primary action fill and the small Laravel Manager monogram tile; its dark foreground keeps the action label readable.
+- **Slate Ink** (#495464): Primary interface text, actions, selected navigation, keyboard focus, and the compact Laravel Manager mark; paper-colored text maintains readable contrast on slate fills.
 
 ### Neutral
-- **Pale Moss**: The page background, carrying most of the interface.
-- **Forest Ink**: Primary interface text and card text.
-- **Sidebar Moss**: The navigation surface, separated from the page by a fine moss border.
-- **Card Paper**: The near-white background of app list cards and tables.
-- **Muted Moss**: Quiet informational surfaces, table headings, and secondary status fills.
-- **Muted Copy**: Supporting descriptions, field hints, and secondary values.
-- **Moss Border**: The shared line for controls, containers, and row separators.
-- **Warm Hover**: A light accent wash on hoverable controls.
+- **Paper Canvas** (#F4F4F2): The main page, form, card, and popover surface.
+- **Soft Gray** (#E8E8E8): The sidebar, table headings, and quiet informational surfaces.
+- **Blue Gray** (#BBBFCA): Borders and dividers that organize rows and containers.
+- **Control Outline** (hsl(224 12.4% 54%)): A darker blue-gray derived from the palette for form-field edges that need clear visual contrast.
 
 ### Named Rules
-**The Clay Action Rule.** Keep the clay accent on primary actions and the compact product mark; let the moss neutrals carry the rest of the screen.
+**The Slate Action Rule.** Use slate for primary actions, focus, and selected navigation; use paper and gray surfaces to carry the rest of the screen.
 
 ## Typography
 
@@ -166,7 +157,7 @@ A 4px spacing unit creates the rhythm: labels sit close to controls, related fie
 
 ## Elevation & Depth
 
-The interface is flat at rest. Thin borders separate rows and frame controls; small differences in moss and paper tones distinguish the sidebar, page, and cards. The mobile navigation scrim darkens the page while the navigation panel remains a solid surface. There is no content-card shadow vocabulary.
+The interface is flat at rest. Thin borders separate rows and frame controls; paper, cool gray, and blue-gray distinguish the sidebar, page, and grouped content. The mobile navigation scrim darkens the page while the navigation panel remains a solid surface. April's opt-in `.dark` class reverses slate and paper roles using the same palette. There is no content-card shadow vocabulary.
 
 ### Named Rules
 **The Border-Led Depth Rule.** Show grouping with a tint or border before adding elevation.
@@ -180,34 +171,34 @@ The shape language is gently rounded and consistent: common inputs and buttons u
 ### Buttons
 Buttons are compact and clear, with a 40px control height.
 - **Shape:** 6px corners.
-- **Primary:** Clay fill with dark clay text; 8px vertical and 16px horizontal padding.
-- **Outline:** Page-colored fill, moss border, and forest text.
-- **Hover / Focus:** Primary fill darkens slightly on hover; outline controls take a warm tint. Keyboard focus uses a 2px ring with an offset.
+- **Primary:** Slate fill with paper text; 8px vertical and 16px horizontal padding.
+- **Outline:** Paper fill, blue-gray border, and slate text.
+- **Hover / Focus:** Secondary controls take a soft-gray tint. Keyboard focus uses a 2px slate ring with an offset.
 - **Disabled:** The control dims and stops accepting pointer input.
 
 ### Chips / Status Badges
 Status is a small, pill-shaped label rather than a large colored panel. Neutral states use an outline; active, provisioning, and failed states use the semantic secondary, primary, and destructive treatments.
 
 ### Cards / Containers
-App cards and the desktop table use a near-white fill, a thin moss border, and 8px corners. Mobile cards keep 16px internal padding. Detail and settings sections rely on horizontal rules rather than nested decorative cards.
+App cards and the desktop table use a paper fill, a thin blue-gray border, and 8px corners. Mobile cards keep 16px internal padding. Detail and settings sections rely on horizontal rules rather than nested decorative cards.
 
 ### Inputs / Fields
-Fields use the page background, a 1px moss border, 6px corners, and a 40px height. Focus uses the clay ring. Validation messages use the destructive color and remain adjacent to the affected field.
+Fields use the paper background, a 1px control-outline border, 6px corners, and a 40px height. Focus uses the slate ring. Validation messages use the destructive color and remain adjacent to the affected field.
 
 ### Navigation
-The desktop sidebar uses the slightly deeper moss surface, compact group labels, and 16px line icons. The active item gets a soft moss tint. On mobile, the same menu slides in over a scrim; a compact top bar keeps the navigation trigger available.
+The desktop sidebar uses a soft-gray surface, compact group labels, and 16px line icons. The active item uses a slate fill with paper text. On mobile, the same menu slides in over a scrim; a compact top bar keeps the navigation trigger available.
 
 ### Server Page
 
 The Server page uses a compact, border-led definition list for operating system, PHP runtime, default app PHP version, and configured server values. Domains, paths, URLs, and IP addresses use monospace. Fixed local software checks appear as divided rows with a short version string and a small status badge. Keep the page read-only and make its Settings link an outline action.
 
 ### Domain Preview
-A live domain preview sits in a muted, bordered field with monospace text, distinguishing a generated technical value from editable inputs.
+A live domain preview sits in a soft-gray, blue-gray-bordered field with monospace text, distinguishing a generated technical value from editable inputs.
 
 ## Do's and Don'ts
 
 ### Do:
-- **Do** keep the broad surface moss-neutral and reserve clay for the primary action and compact product mark.
+- **Do** use the supplied paper, gray, blue-gray, and slate palette for surface, divider, text, and action roles.
 - **Do** use monospace for domains, paths, and other technical values.
 - **Do** separate app data and settings with compact spacing, readable labels, and thin borders.
 - **Do** carry the sidebar menu into a slide-in mobile panel and present mobile app rows as cards.

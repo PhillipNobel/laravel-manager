@@ -74,14 +74,16 @@ show_plan() {
         'Target: Ubuntu 24.04 LTS (amd64 or arm64)' \
         "Repository: $LARAVEL_MANAGER_REPOSITORY" \
         'Install directory: /opt/laravel-manager' \
-        'PHP-FPM: 8.3' \
+        'PHP-FPM: 8.2, 8.3, and 8.4 (ppa:ondrej/php)' \
         'Node.js: 24 LTS' \
-        'Packages: Apache, MySQL, Git, Composer, Certbot, PHP extensions, Node.js/npm' \
+        'Databases: MySQL and PostgreSQL' \
+        'Packages: Apache, MySQL, PostgreSQL, Git, Composer, Certbot, PHP runtimes and drivers, Node.js/npm' \
         'Manager database: laravel_manager (local MySQL socket)' \
         'Queue: systemd service running as www-data' \
+        'Updates: sudo laravel-manager update; version: sudo laravel-manager version' \
         "Manager URL: $planned_manager_url" \
         'Application directory: /var/www/apps' \
-        'Firewall: allow TCP ports 80, 443, and 8080 at the VPS provider and host firewall.'
+        'Firewall: keep Manager port 8080 private or source-IP restricted; expose ports 80/443 as needed for managed sites.'
 }
 
 validate_manager_url() {
@@ -152,7 +154,9 @@ require_clean_target() {
         /etc/sudoers.d/laravel-manager-database \
         /usr/local/sbin/laravel-manager-apache \
         /usr/local/sbin/laravel-manager-database \
+        /usr/local/bin/laravel-manager \
         /etc/apt/sources.list.d/nodesource.sources \
+        /etc/apt/sources.list.d/ondrej-ubuntu-php-noble.sources \
         /etc/apt/preferences.d/laravel-manager-nodejs \
         /usr/share/keyrings/nodesource.gpg \
         /var/cache/laravel-manager \
@@ -223,10 +227,33 @@ EOF
 }
 
 install_system_packages() {
+    local version
+    local php_packages=()
+    local php_fpm_services=()
+
     /usr/bin/apt-get update
-    /usr/bin/apt-get install -y ca-certificates curl gnupg
+    /usr/bin/apt-get install -y ca-certificates curl gnupg software-properties-common
+    LC_ALL=C.UTF-8 /usr/bin/add-apt-repository --yes ppa:ondrej/php
     install_nodesource_repository
     /usr/bin/apt-get update
+
+    for version in 8.2 8.3 8.4; do
+        php_packages+=(
+            "php${version}-bcmath"
+            "php${version}-cli"
+            "php${version}-curl"
+            "php${version}-fpm"
+            "php${version}-intl"
+            "php${version}-mbstring"
+            "php${version}-mysql"
+            "php${version}-opcache"
+            "php${version}-pgsql"
+            "php${version}-xml"
+            "php${version}-zip"
+        )
+        php_fpm_services+=("php${version}-fpm.service")
+    done
+
     /usr/bin/apt-get install -y \
         apache2 \
         certbot \
@@ -234,23 +261,15 @@ install_system_packages() {
         mysql-server \
         nodejs \
         openssl \
-        php8.3-bcmath \
-        php8.3-cli \
-        php8.3-curl \
-        php8.3-fpm \
-        php8.3-intl \
-        php8.3-mbstring \
-        php8.3-mysql \
-        php8.3-opcache \
-        php8.3-xml \
-        php8.3-zip \
+        postgresql \
+        "${php_packages[@]}" \
         python3 \
         python3-certbot-apache \
         sudo \
         unzip
 
     [[ "$(/usr/bin/node --version)" =~ ^v24\. ]] || fail 'NodeSource did not install Node.js 24.'
-    /usr/bin/systemctl enable --now mysql.service php8.3-fpm.service apache2.service
+    /usr/bin/systemctl enable --now mysql.service postgresql.service "${php_fpm_services[@]}" apache2.service
 }
 
 install_composer() {
@@ -265,7 +284,7 @@ install_composer() {
     actual_checksum=$(/usr/bin/sha384sum "$INSTALL_TMP/composer-setup.php" | /usr/bin/awk '{print $1}')
     [[ "$actual_checksum" == "$expected_checksum" ]] || fail 'Composer installer checksum verification failed.'
 
-    /usr/bin/php "$INSTALL_TMP/composer-setup.php" \
+    /usr/bin/php8.3 "$INSTALL_TMP/composer-setup.php" \
         --quiet --install-dir=/usr/local/bin --filename=composer
     /bin/rm -f -- "$INSTALL_TMP/composer-setup.php"
 }
@@ -308,7 +327,6 @@ DB_SOCKET=/var/run/mysqld/mysqld.sock
 DB_DATABASE=${APP_DATABASE}
 DB_USERNAME=${APP_DB_USER}
 DB_PASSWORD=${database_password}
-MANAGER_PHP_VERSIONS=8.3
 EOF
     unset database_password
     /usr/bin/chown www-data:www-data "$APP_DIR/.env"
@@ -319,7 +337,8 @@ install_application() {
     /usr/bin/git clone --depth=1 "$LARAVEL_MANAGER_REPOSITORY" "$APP_DIR"
     /usr/bin/chown -R www-data:www-data "$APP_DIR"
     /usr/bin/find "$APP_DIR" -type d -exec /bin/chmod 0750 {} +
-    /usr/bin/find "$APP_DIR" -type f -exec /bin/chmod 0640 {} +
+    /usr/bin/find "$APP_DIR" -type f ! -perm /111 -exec /bin/chmod 0640 {} +
+    /usr/bin/find "$APP_DIR" -type f -perm /111 -exec /bin/chmod 0750 {} +
     /usr/bin/chmod 0750 "$APP_DIR/artisan"
 
     /usr/bin/install -d -o www-data -g www-data -m 0770 \
@@ -337,7 +356,7 @@ install_application() {
     /usr/sbin/runuser -u www-data -- env \
         HOME=/var/www \
         COMPOSER_HOME=/var/cache/laravel-manager/composer \
-        /usr/local/bin/composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
+        /usr/bin/php8.3 /usr/local/bin/composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
     /usr/sbin/runuser -u www-data -- env \
         HOME=/var/www \
         npm_config_cache=/var/cache/laravel-manager/npm \
@@ -348,26 +367,32 @@ install_application() {
         /usr/bin/npm run build
     /usr/sbin/runuser -u www-data -- env \
         HOME=/var/www \
-        /usr/bin/php artisan key:generate --force
-    /usr/sbin/runuser -u www-data -- /usr/bin/php artisan migrate --force
+        /usr/bin/php8.3 artisan key:generate --force
+    /usr/sbin/runuser -u www-data -- /usr/bin/php8.3 artisan migrate --force
 
     export LOCAL_ADMIN_NAME='Laravel Manager Admin'
     export LOCAL_ADMIN_EMAIL="$ADMIN_EMAIL"
     export LOCAL_ADMIN_PASSWORD="$ADMIN_PASSWORD"
-    /usr/sbin/runuser -u www-data --preserve-environment -- /usr/bin/php \
+    /usr/sbin/runuser -u www-data --preserve-environment -- /usr/bin/php8.3 \
         artisan db:seed --class=AdminUserSeeder --force
     unset LOCAL_ADMIN_NAME LOCAL_ADMIN_EMAIL LOCAL_ADMIN_PASSWORD ADMIN_PASSWORD
 
-    /usr/sbin/runuser -u www-data -- /usr/bin/php artisan optimize
+    /usr/sbin/runuser -u www-data -- /usr/bin/php8.3 artisan optimize
     /usr/bin/chown -R root:www-data "$APP_DIR"
     /usr/bin/find "$APP_DIR" -type d -exec /bin/chmod 0750 {} +
-    /usr/bin/find "$APP_DIR" -type f -exec /bin/chmod 0640 {} +
+    /usr/bin/find "$APP_DIR" -type f ! -perm /111 -exec /bin/chmod 0640 {} +
+    /usr/bin/find "$APP_DIR" -type f -perm /111 -exec /bin/chmod 0750 {} +
     /usr/bin/chmod 0750 "$APP_DIR/artisan"
     /usr/bin/chown -R www-data:www-data "$APP_DIR/storage" "$APP_DIR/bootstrap/cache"
     /usr/bin/find "$APP_DIR/storage" "$APP_DIR/bootstrap/cache" -type d -exec /bin/chmod 0770 {} +
     /usr/bin/find "$APP_DIR/storage" "$APP_DIR/bootstrap/cache" -type f -exec /bin/chmod 0660 {} +
     /usr/bin/chown root:www-data "$APP_DIR/.env"
     /usr/bin/chmod 0640 "$APP_DIR/.env"
+}
+
+install_manager_command() {
+    /usr/bin/install -o root -g root -m 0755 \
+        "$APP_DIR/scripts/laravel-manager" /usr/local/bin/laravel-manager
 }
 
 install_helpers_and_configuration() {
@@ -394,7 +419,6 @@ configure_apache() {
     /usr/bin/install -o root -g root -m 0644 \
         "$APP_DIR/scripts/laravel-manager-vhost.conf" /etc/apache2/sites-available/laravel-manager.conf
     /usr/sbin/a2enmod rewrite proxy_fcgi setenvif
-    /usr/sbin/a2enconf php8.3-fpm
     /usr/sbin/a2enconf laravel-manager-port
     /usr/sbin/a2ensite laravel-manager
     /usr/bin/install -d -o www-data -g www-data -m 0750 "$APPLICATIONS_DIR"
@@ -458,6 +482,7 @@ main() {
     install_system_packages
     install_composer
     install_application
+    install_manager_command
     install_helpers_and_configuration
     configure_apache
     install_queue_service
@@ -466,7 +491,8 @@ main() {
     printf '\nLaravel Manager installed successfully.\n'
     printf 'Open: %s\n' "$MANAGER_URL"
     printf 'Administrator: %s\n' "$ADMIN_EMAIL"
-    printf 'Allow TCP ports 80, 443, and 8080 in the VPS firewall.\n'
+    printf 'Security: port 8080 is plain HTTP. Keep it private and use an SSH tunnel or TLS reverse proxy before signing in.\n'
+    printf 'Allow TCP ports 80 and 443 for managed sites as needed.\n'
 }
 
 main "$@"

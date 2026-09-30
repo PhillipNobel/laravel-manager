@@ -10,6 +10,7 @@ class GitHubWebhookDelivery extends Model
 
     protected $fillable = [
         'delivery_id',
+        'payload_hash',
         'event',
         'repository_name',
         'ref',

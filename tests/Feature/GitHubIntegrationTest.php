@@ -93,6 +93,8 @@ it('validates and securely stores a GitHub account connection', function () {
     expect($connection->login)->toBe('octocat')
         ->and($connection->name)->toBe('The Octocat')
         ->and($connection->access_token)->toBe('gho_test_secret')
+        ->and($connection->toArray())->not->toHaveKey('access_token')
+        ->and($connection->toJson())->not->toContain('gho_test_secret')
         ->and(DB::table('github_connections')->value('access_token'))->not->toBe('gho_test_secret');
 
     Http::assertSent(fn ($request): bool => $request->url() === 'https://github.com/login/oauth/access_token'

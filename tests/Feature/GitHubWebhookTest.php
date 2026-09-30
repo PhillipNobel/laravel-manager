@@ -53,6 +53,7 @@ it('queues deployments only for projects matching the GitHub repository and conf
 
     expect($delivery->repository_name)->toBe('octocat/customer-portal')
         ->and($delivery->ref)->toBe('refs/heads/main')
+        ->and($delivery->payload_hash)->toBe(hash('sha256', json_encode(webhookPushPayload(), JSON_THROW_ON_ERROR)))
         ->and($delivery->status)->toBe('queued')
         ->and($delivery->deployments_queued)->toBe(2);
 });
@@ -103,6 +104,48 @@ it('does not queue duplicate GitHub delivery IDs', function () {
     Queue::assertPushed(DeployProject::class, 1);
 });
 
+it('deduplicates a captured signed payload if its unsigned delivery header changes', function () {
+    createWebhookProject();
+    connectWebhookGitHubAccount();
+    $payload = webhookPushPayload();
+
+    postSignedGitHubWebhook($this, $payload)
+        ->assertStatus(202)
+        ->assertJsonPath('status', 'queued');
+
+    postSignedGitHubWebhook(
+        $this,
+        $payload,
+        deliveryId: '72d3162e-cc78-11e3-81ab-4c9367dc0959',
+    )
+        ->assertStatus(202)
+        ->assertExactJson(['status' => 'duplicate', 'deployments_queued' => 0]);
+
+    expect(GitHubWebhookDelivery::query()->count())->toBe(1)
+        ->and(Deployment::query()->count())->toBe(1);
+
+    Queue::assertPushed(DeployProject::class, 1);
+});
+
+it('does not treat a non-push payload with branch fields as a push event', function () {
+    createWebhookProject();
+    connectWebhookGitHubAccount();
+
+    $payload = [
+        'ref' => 'refs/heads/main',
+        'repository' => ['full_name' => 'octocat/customer-portal'],
+    ];
+
+    postSignedGitHubWebhook($this, $payload)
+        ->assertStatus(202)
+        ->assertJsonPath('status', 'ignored');
+
+    expect(GitHubWebhookDelivery::query()->sole()->status)->toBe('ignored')
+        ->and(Deployment::query()->count())->toBe(0);
+
+    Queue::assertNothingPushed();
+});
+
 it('rejects a request with an invalid signature without recording it', function () {
     $body = json_encode(webhookPushPayload(), JSON_THROW_ON_ERROR);
 
@@ -125,6 +168,21 @@ it('requires a configured webhook secret', function () {
         ->assertJsonPath('message', 'GitHub webhook secret is not configured.');
 
     expect(GitHubWebhookDelivery::query()->count())->toBe(0);
+});
+
+it('rejects an oversized webhook before verifying or recording it', function () {
+    $body = json_encode(webhookPushPayload(), JSON_THROW_ON_ERROR);
+
+    $this->call('POST', '/webhooks/github', [], [], [], [
+        'CONTENT_TYPE' => 'application/json',
+        'CONTENT_LENGTH' => (string) (25 * 1024 * 1024 + 1),
+        'HTTP_X_GITHUB_DELIVERY' => '72d3162e-cc78-11e3-81ab-4c9367dc0958',
+        'HTTP_X_GITHUB_EVENT' => 'push',
+        'HTTP_X_HUB_SIGNATURE_256' => 'sha256='.hash_hmac('sha256', $body, 'webhook-test-secret'),
+    ], $body)->assertStatus(413);
+
+    expect(GitHubWebhookDelivery::query()->count())->toBe(0);
+    Queue::assertNothingPushed();
 });
 
 it('records but ignores non-push events', function () {
@@ -203,7 +261,9 @@ function webhookPushPayload(
 ): array {
     return [
         'ref' => $ref,
+        'created' => false,
         'deleted' => $deleted,
+        'after' => str_repeat('a', 40),
         'repository' => ['full_name' => $repository],
     ];
 }

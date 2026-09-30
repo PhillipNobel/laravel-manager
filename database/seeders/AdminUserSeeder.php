@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Models\AppSetting;
 use App\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
@@ -24,6 +25,11 @@ class AdminUserSeeder extends Seeder
                 'name' => config('manager.local_admin_name') ?: 'Laravel Manager Admin',
                 'password' => Hash::make($password),
             ],
+        );
+
+        AppSetting::query()->firstOrCreate(
+            ['key' => 'setup_completed'],
+            ['value' => '0'],
         );
     }
 }

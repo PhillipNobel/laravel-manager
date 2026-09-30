@@ -83,22 +83,62 @@
 
             <div class="space-y-2">
                 <label for="phpVersion" class="text-sm font-medium">PHP version</label>
-                <april:native-select id="phpVersion" wire:model="phpVersion" class="w-full" :aria-describedby="$errors->has('phpVersion') ? 'phpVersion-error' : null" :aria-invalid="$errors->has('phpVersion') ? 'true' : 'false'">
-                    @foreach ($phpVersions as $version)
-                        <option value="{{ $version }}">{{ $version }}</option>
+                <april:native-select id="phpVersion" wire:model.live="phpVersion" class="w-full" :aria-describedby="$errors->has('phpVersion') ? 'phpVersion-hint phpVersion-error' : 'phpVersion-hint'" :aria-invalid="$errors->has('phpVersion') ? 'true' : 'false'">
+                    @if (! $hasAvailablePhpVersion)
+                        <option value="" disabled selected>No PHP-FPM runtime available</option>
+                    @endif
+                    @foreach ($phpOptions as $option)
+                        <option value="{{ $option['value'] }}" @disabled(! $option['available'])>
+                            PHP {{ $option['value'] }}{{ $option['available'] ? '' : ' (unavailable)' }}
+                        </option>
                     @endforeach
                 </april:native-select>
+                <p id="phpVersion-hint" class="text-sm text-muted-foreground">The selected PHP-FPM version will run this application.</p>
+                @foreach ($phpOptions as $option)
+                    @if (! $option['available'])
+                        <p class="text-xs leading-5 text-muted-foreground">PHP {{ $option['value'] }}: {{ $option['requirement'] }}</p>
+                    @endif
+                @endforeach
                 @error('phpVersion')
                     <p id="phpVersion-error" class="text-sm text-destructive" role="alert">{{ $message }}</p>
                 @enderror
             </div>
+
+            <div class="space-y-2">
+                <label for="databaseEngine" class="text-sm font-medium">Database engine</label>
+                <april:native-select id="databaseEngine" wire:model="databaseEngine" class="w-full" :aria-describedby="$errors->has('databaseEngine') ? 'databaseEngine-hint databaseEngine-error' : 'databaseEngine-hint'" :aria-invalid="$errors->has('databaseEngine') ? 'true' : 'false'">
+                    @if (! $hasAvailableDatabaseEngine)
+                        <option value="" disabled selected>No database engine available</option>
+                    @endif
+                    @foreach ($databaseOptions as $option)
+                        <option value="{{ $option['value'] }}" @disabled(! $option['available'])>
+                            {{ $option['label'] }}{{ $option['available'] ? '' : ' (unavailable)' }}
+                        </option>
+                    @endforeach
+                </april:native-select>
+                <p id="databaseEngine-hint" class="text-sm text-muted-foreground">Each app gets its own database and account.</p>
+                @foreach ($databaseOptions as $option)
+                    @if (! $option['available'])
+                        <p class="text-xs leading-5 text-muted-foreground">{{ $option['label'] }}: {{ $option['requirement'] }}</p>
+                    @endif
+                @endforeach
+                @error('databaseEngine')
+                    <p id="databaseEngine-error" class="text-sm text-destructive" role="alert">{{ $message }}</p>
+                @enderror
+            </div>
         </div>
+
+        @if (! $hasAvailablePhpVersion)
+            <p class="rounded-md border border-border bg-muted/50 px-3.5 py-3 text-sm leading-6 text-muted-foreground" role="status">
+                No supported PHP-FPM runtime is ready. Install and start a PHP 8.2, 8.3, or 8.4 runtime before creating an app.
+            </p>
+        @endif
 
         <p class="rounded-md bg-muted/60 px-3.5 py-3 text-sm leading-6 text-muted-foreground">Laravel Manager will clone the selected branch and prepare the app directory and environment. It will not run project code or install dependencies.</p>
 
         <div class="flex flex-col-reverse gap-3 border-t border-border pt-5 sm:flex-row sm:justify-end">
             <april:button-link href="{{ route('apps.index') }}" variant="outline">Cancel</april:button-link>
-            <april:button type="submit" wire:loading.attr="disabled" wire:target="save">
+            <april:button type="submit" wire:loading.attr="disabled" wire:target="save" :disabled="! $hasAvailablePhpVersion || ! $hasAvailableDatabaseEngine">
                 <span wire:loading.remove wire:target="save">Create App</span>
                 <span wire:loading wire:target="save">Creating application…</span>
             </april:button>

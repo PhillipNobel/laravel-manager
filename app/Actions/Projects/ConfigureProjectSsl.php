@@ -108,6 +108,7 @@ class ConfigureProjectSsl
             config('manager.apache_helper'),
             $operation,
             $project->slug,
+            $project->php_version ?: '8.3',
         ];
 
         if ($email !== null) {
@@ -185,6 +186,10 @@ class ConfigureProjectSsl
 
         if (! preg_match('/\A[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\z/', $project->slug)) {
             return 'The application subdomain is invalid. Review the project before enabling HTTPS.';
+        }
+
+        if (! in_array($project->php_version ?: '8.3', config('manager.php_versions'), true)) {
+            return 'Choose a supported PHP-FPM version before enabling HTTPS.';
         }
 
         if ($project->domain !== DomainGenerator::generate($project->slug, AppSetting::valueFor('base_domain'))) {

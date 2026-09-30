@@ -108,7 +108,7 @@
         <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
                 <h2 id="database-heading" class="text-base font-semibold">Application database</h2>
-                <p class="mt-1 text-sm text-muted-foreground">A dedicated MySQL database and user for this Laravel app.</p>
+                <p class="mt-1 text-sm text-muted-foreground">A dedicated {{ $project->database_engine?->label() ?? 'database' }} database and user for this Laravel app.</p>
             </div>
             <april:badge class="self-start sm:self-auto" :variant="$databaseStatus->badgeVariant()">{{ $databaseStatus->label() }}</april:badge>
         </div>
@@ -164,6 +164,10 @@
             <div class="grid gap-1 py-3 sm:grid-cols-[12rem_minmax(0,1fr)] sm:gap-6">
                 <dt class="text-sm text-muted-foreground">PHP version</dt>
                 <dd class="text-sm">{{ $project->php_version ?: 'Not selected' }}</dd>
+            </div>
+            <div class="grid gap-1 py-3 sm:grid-cols-[12rem_minmax(0,1fr)] sm:gap-6">
+                <dt class="text-sm text-muted-foreground">Database engine</dt>
+                <dd class="text-sm">{{ $project->database_engine?->label() ?? 'Not selected' }}</dd>
             </div>
             <div class="grid gap-1 py-3 sm:grid-cols-[12rem_minmax(0,1fr)] sm:gap-6">
                 <dt class="text-sm text-muted-foreground">Application path</dt>

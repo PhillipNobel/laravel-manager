@@ -29,6 +29,14 @@ Laravel Manager is a small self-hosted application for managing Laravel projects
 - Use the Impeccable skill for interface review and improvement. Keep its recommendations within this product's restrained operating UI.
 - Verify meaningful UI work in Chrome DevTools MCP at desktop and narrow/mobile sizes, including interactions and browser console.
 
+## Mandatory Ubuntu VM verification
+
+- Test every RUN on the existing disposable Ubuntu 24.04 Multipass VM `laravel-manager-run11` (or the current Ubuntu VM explicitly selected for this project), in addition to local automated checks.
+- Inspect the VM and installed services before changing it. Reuse its current state; never delete, reset, reinstall, or overwrite its application data without the user's explicit authorization for that action.
+- Test the RUN's real server behavior in the VM. When changes are not published, transfer the current project files to the VM for testing rather than pushing unfinished work to GitHub.
+- For UI changes, use Chrome DevTools against the VM-hosted app when the changed code can be loaded there; check desktop and narrow/mobile layouts and the browser console.
+- Record the VM name, Ubuntu version, commands, and outcomes in the current RUN documentation. Do not mark a RUN complete based only on local tests. If a required VM check cannot run, record the exact blocker and leave the RUN incomplete.
+
 ## Documentation and current RUN
 
 - `RUNS.md` is the source of truth for the sequential project roadmap.
@@ -81,7 +89,7 @@ RUN 07 may queue manual deployments only for an active Project with an active da
 
 ## RUN 08 safety boundary
 
-RUN 08 accepts GitHub webhooks only through the dedicated unauthenticated endpoint after validating `X-Hub-Signature-256` against the exact raw request body with `GITHUB_WEBHOOK_SECRET`. Exclude only this endpoint from request forgery protection. Store unique delivery IDs and minimal event metadata, never raw payloads, signatures, or secrets. Handle only push events, match the exact configured repository and branch, ignore deleted branches, and queue deployments through the Run 07 action so existing readiness and concurrency rules apply. Do not create GitHub webhooks through the API, execute operating-system commands from the webhook request, or add deployment retry/rollback behavior.
+RUN 08 accepts GitHub webhooks only through the dedicated unauthenticated endpoint after validating `X-Hub-Signature-256` against the exact raw request body with `GITHUB_WEBHOOK_SECRET`. Exclude only this endpoint from request forgery protection. Store unique delivery IDs, a SHA-256 fingerprint of the signed body, and minimal event metadata; never store raw payloads, signatures, or secrets. Do not trust the unsigned delivery/event headers alone: deduplicate repeated body fingerprints and validate push-specific payload fields before matching repository/branch. Handle only push events, match the exact configured repository and branch, ignore deleted branches, and queue deployments through the Run 07 action so existing readiness and concurrency rules apply. Do not create GitHub webhooks through the API, execute operating-system commands from the webhook request, or add deployment retry/rollback behavior.
 
 ## RUN 09 safety boundary
 
@@ -95,6 +103,22 @@ RUN 10 may check a deployed application only when its Project has an active Apac
 
 RUN 11's root-only installer supports Ubuntu 24.04 on amd64 and arm64 only. It may install fixed OS packages, clone only the configured HTTPS GitHub Manager repository, create the Manager database, configure Apache/PHP-FPM, install the existing root-owned helpers and exact sudo rules, write the Manager vhost, and install one queue worker unit. Laravel/PHP, Composer, npm, migrations, seeders, and the queue worker must run as `www-data`; never run application code as root. Keep the Manager source root-owned and writable runtime directories limited to `storage` and `bootstrap/cache`. The Manager itself uses PHP 8.3 and MySQL in production; do not ask the installer user to choose per-app runtimes or database engines. Do not alter SSH, UFW/provider firewalls, remote MySQL access, Cloudflare DNS, or unrelated system services. Never execute the installer in local development or tests; tests may invoke only `scripts/install.sh --dry-run`, which must not modify the host. Before marking this RUN complete, smoke-test the full installer on a disposable Ubuntu 24.04 VPS.
 
-## Approved per-application PHP/database direction (RUN 12 pending)
+## RUN 12 safety boundary — per-application PHP/database choices
 
-Create App will collect a PHP version (initial options: 8.2, 8.3, or 8.4) and a database engine (MySQL or PostgreSQL) for each Project. The Settings PHP value may preselect a version; the Project's saved value is authoritative. Laravel Manager itself stays on PHP 8.3 and uses MySQL in production; local development remains SQLite. Only offer runtimes and engines that are available on the server. Never install OS packages from an HTTP request. Implement this extension only in RUN 12 after it is explicitly requested; verify current PHP support and the safe Ubuntu package strategy when that RUN starts.
+Create App collects one of the fixed PHP versions 8.2, 8.3, or 8.4 and one of the fixed database engines MySQL or PostgreSQL per Project. The Settings PHP value may preselect a version; a Project's saved value is authoritative. Keep Laravel Manager on PHP 8.3/MySQL in production and SQLite in local development. Detect the selected PHP-FPM service/socket, database service, and matching PHP PDO driver. Show unavailable choices disabled with the missing requirement and repeat all checks during save; public Livewire properties are not trusted for availability.
+
+The root-only Ubuntu 24.04 installer may add the signed Ondřej Surý PHP PPA and install the supported PHP-FPM versions, drivers, MySQL, and PostgreSQL. Never install packages or enable services from an HTTP request. Keep PHP versions and database engines allowlisted in Laravel validation, Apache sudoers, and the root-owned helpers. Apache uses the Project's selected PHP-FPM socket, including HTTPS. Deployment invokes the fixed PHP CLI binary and Composer under that Project's selected PHP version.
+
+Laravel stays unprivileged. Provision an app database only through the root-owned `laravel-manager-database` helper with a validated slug and `mysql|pgsql` argument. MySQL uses the local root-authenticated socket; PostgreSQL uses the local `postgres` OS account. Give each app its own database/account with database-local privileges only. Write the random credential only to the project's `.env` with owner/mode preserved and verify the app connection. Never store the password in Project, render it in the UI, pass it in process arguments/environment, or log it. Fake helper/process calls in tests and never connect tests to MySQL or PostgreSQL.
+
+## RUN 13 safety boundary — first-run setup
+
+The installer creates the initial administrator; setup confirms that authenticated account and must not add public registration. Mark setup incomplete only when the initial admin seeder first creates its setting, and preserve a completed value on subsequent seeder runs. Existing servers without a setup marker remain usable. During setup, allow only the authenticated wizard, GitHub OAuth connect/callback, logout, and read-only fixed local requirement checks. Save only ordinary server settings; never install software, run privileged helpers, provision apps/databases, make DNS API/network checks, or modify Apache. GitHub is optional. Require the administrator to confirm wildcard DNS manually and describe it as a confirmation, not an automated verification. Until setup is complete, protect Apps, Server, and Settings routes. Keep all process calls fixed, local, and bounded.
+
+## RUN 14 security boundary — hardening review
+
+Keep the single-administrator trust model and document that the installer currently shares `www-data` between Manager, application PHP-FPM, and deployment scripts. Do not imply per-project isolation. Require trusted repositories and private or TLS-protected access to Manager port 8080. Preserve narrow root helpers and fixed command arrays; never add terminal access or user-controlled process arguments. Keep OAuth tokens hidden from serialization, lock model-backed Livewire state used by privileged actions, bound webhook request size, and redact secrets from stored process output. Review every `Process` and `subprocess.run` call, sudoers rule, and installer root operation when changing infrastructure code.
+
+## RUN 15 safety boundary — Manager updates
+
+Run Manager updates only through the root-owned `/usr/local/bin/laravel-manager update` CLI command, initiated by an administrator with `sudo`. The command accepts no user-provided command, path, repository, or branch; it follows the installed HTTPS GitHub origin and checked-out branch. Before rejecting a dirty checkout, it may restore executable mode only for a tracked file whose content hash still matches Git; all other local changes block the update. Use a root-owned incomplete-update marker so the same command can resume after a failed or interrupted update; serialize updates with a local lock. Run Laravel, Composer, and npm as `www-data`. Keep the updater out of HTTP routes and sudoers grants for `www-data`. Stop Apache, the queue, and every active supported PHP-FPM service during the brief update window; restore root ownership of Manager source and dependencies before services restart, then verify the local login endpoint. Never run Artisan, Composer, or npm as root.

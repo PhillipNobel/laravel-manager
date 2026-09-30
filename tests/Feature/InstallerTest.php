@@ -15,11 +15,57 @@ it('prints the Ubuntu installation plan without changing the host', function () 
             'Dry run; no system changes will be made.',
             'Target: Ubuntu 24.04 LTS',
             'Repository: https://github.com/acme/laravel-manager.git',
-            'PHP-FPM: 8.3',
+            'PHP-FPM: 8.2, 8.3, and 8.4 (ppa:ondrej/php)',
             'Node.js: 24 LTS',
+            'Databases: MySQL and PostgreSQL',
+            'Updates: sudo laravel-manager update; version: sudo laravel-manager version',
             'Manager URL: http://SERVER_IP:8080',
-            'Firewall: allow TCP ports 80, 443, and 8080',
+            'Firewall: keep Manager port 8080 private or source-IP restricted',
         );
+});
+
+it('installs a root-owned update command and keeps updates out of web requests', function () {
+    $installer = file_get_contents(base_path('scripts/install.sh'));
+    $command = file_get_contents(base_path('scripts/laravel-manager'));
+    $syntax = new SymfonyProcess(['/bin/bash', '-n', base_path('scripts/laravel-manager')]);
+    $syntax->run();
+
+    expect($syntax->isSuccessful())->toBeTrue()
+        ->and($installer)->toContain(
+            '/usr/local/bin/laravel-manager',
+            'install_manager_command',
+            '-type f ! -perm /111 -exec /bin/chmod 0640',
+            '-type f -perm /111 -exec /bin/chmod 0750',
+        )
+        ->and($command)->toContain(
+            'Run updates as root: sudo laravel-manager update.',
+            'env -i -C "$APP_DIR"',
+            'GIT_CONFIG_KEY_0=safe.directory',
+            'fetch --prune --tags origin',
+            'merge --ff-only FETCH_HEAD',
+            'update-incomplete',
+            'Resuming an interrupted update',
+            'Another Laravel Manager update is already running.',
+            'restore_tracked_executable_modes',
+            'ls-files --stage',
+            'hash-object --',
+            "COMPOSER_BIN='/usr/local/bin/composer'",
+            '--no-dev --no-interaction --prefer-dist --optimize-autoloader',
+            '/usr/bin/npm --prefix',
+            ' ci --no-audit --no-fund',
+            'migrate --force',
+            'artisan optimize',
+            'laravel-manager-queue.service',
+        )->not->toContain('eval ', 'sudoers');
+});
+
+it('rejects unsupported manager command arguments without starting an update', function () {
+    $process = new SymfonyProcess(['/bin/bash', base_path('scripts/laravel-manager'), 'shell']);
+    $process->run();
+
+    expect($process->isSuccessful())->toBeFalse()
+        ->and($process->getExitCode())->toBe(2)
+        ->and($process->getErrorOutput())->toContain('Usage:');
 });
 
 it('uses the configured manager URL in the installation plan and Laravel environment', function () {
@@ -102,9 +148,19 @@ it('serves the manager from its public directory on port 8080', function () {
             '<VirtualHost *:8080>',
             'DocumentRoot "/opt/laravel-manager/public"',
             '<Directory "/opt/laravel-manager/public">',
+            'SetHandler "proxy:unix:/run/php/php8.3-fpm.sock|fcgi://localhost/"',
             'AllowOverride All',
             'Require all granted',
         )->not->toContain('DocumentRoot "/opt/laravel-manager"');
+});
+
+it('keeps PHP-FPM selection inside each application virtual host', function () {
+    $apacheHelper = file_get_contents(base_path('scripts/laravel-manager-apache'));
+    $managerVhost = file_get_contents(base_path('scripts/laravel-manager-vhost.conf'));
+
+    expect($apacheHelper)->toContain('SUPPORTED_PHP_VERSIONS = {"8.2", "8.3", "8.4"}')
+        ->and($managerVhost)->toContain('php8.3-fpm.sock')
+        ->and(file_get_contents(base_path('scripts/install.sh')))->not->toContain('a2enconf php8.3-fpm');
 });
 
 it('runs the persistent database queue worker as www-data', function () {
@@ -120,11 +176,24 @@ it('runs the persistent database queue worker as www-data', function () {
     )->not->toContain('User=root');
 });
 
+it('installs all supported PHP runtimes and database drivers at setup time', function () {
+    $installer = file_get_contents(base_path('scripts/install.sh'));
+
+    expect($installer)->toContain(
+        'add-apt-repository --yes ppa:ondrej/php',
+        'for version in 8.2 8.3 8.4',
+        '"php${version}-fpm"',
+        '"php${version}-mysql"',
+        '"php${version}-pgsql"',
+        'postgresql.service',
+    )->not->toContain('MANAGER_PHP_VERSIONS=8.3');
+});
+
 it('limits database helper sudo access to one anchored provision argument pattern', function () {
     $sudoers = trim(file_get_contents(base_path('scripts/laravel-manager-database.sudoers')));
 
     expect($sudoers)->toBe(
-        'www-data ALL=(root) NOPASSWD: /usr/local/sbin/laravel-manager-database ^provision [a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
+        'www-data ALL=(root) NOPASSWD: /usr/local/sbin/laravel-manager-database ^provision [a-z0-9]([a-z0-9-]{0,61}[a-z0-9])? (mysql|pgsql)$'
     );
 });
 

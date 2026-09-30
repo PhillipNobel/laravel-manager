@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\DatabaseEngine;
 use App\Enums\DatabaseStatus;
 use App\Enums\DomainStatus;
 use App\Enums\ProjectStatus;
@@ -20,6 +21,7 @@ class Project extends Model
         'repository_name',
         'branch',
         'php_version',
+        'database_engine',
         'database_name',
         'database_username',
         'database_status',
@@ -41,6 +43,7 @@ class Project extends Model
             'ssl_status' => SslStatus::class,
             'ssl_expires_at' => 'datetime',
             'database_status' => DatabaseStatus::class,
+            'database_engine' => DatabaseEngine::class,
         ];
     }
 

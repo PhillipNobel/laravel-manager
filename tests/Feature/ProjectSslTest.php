@@ -118,6 +118,7 @@ it('records certificate activation and expiry from the restricted Apache helper'
             '/usr/local/sbin/laravel-manager-apache',
             'ssl-enable',
             'customer',
+            '8.3',
             'admin@example.com',
         ] && $process->timeout === 720;
     });
@@ -156,6 +157,7 @@ it('refreshes HTTPS status and records an expired certificate', function () {
         '/usr/local/sbin/laravel-manager-apache',
         'ssl-status',
         'customer',
+        '8.3',
     ]);
 });
 
