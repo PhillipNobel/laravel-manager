@@ -15,6 +15,8 @@ class Project extends Model
     protected $fillable = [
         'webhook_id', 'webhook_url', 'webhook_status', 'webhook_message',
         'webhook_checked_at', 'webhook_verified_at',
+        'automatic_deployment', 'repository_source', 'repository_initialized', 'repository_creation_attempted',
+        'publication_status', 'publication_step', 'publication_version', 'publication_message', 'publication_deployment_id',
         'name',
         'slug',
         'domain',
@@ -40,6 +42,10 @@ class Project extends Model
     protected function casts(): array
     {
         return [
+            'automatic_deployment' => 'boolean',
+            'repository_initialized' => 'boolean',
+            'repository_creation_attempted' => 'boolean',
+            'publication_version' => 'integer',
             'webhook_id' => 'integer',
             'webhook_checked_at' => 'datetime',
             'webhook_verified_at' => 'datetime',

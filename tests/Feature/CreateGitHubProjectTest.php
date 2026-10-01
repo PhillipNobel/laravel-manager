@@ -13,10 +13,12 @@ use Illuminate\Process\PendingProcess;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Livewire\Livewire;
 
 beforeEach(function () {
+    Queue::fake();
     config(['manager.manager_url' => 'http://localhost']);
     $this->actingAs(User::factory()->create());
     $this->applicationsRoot = storage_path('framework/testing/new-apps-'.Str::uuid());
@@ -123,12 +125,13 @@ it('creates a private Laravel repository from Create App and provisions its main
         ->call('save')
         ->assertHasNoErrors();
 
+    runQueuedPublicationForTests();
     $project = Project::query()->sole();
 
     $form->assertRedirect(route('apps.show', $project));
 
-    expect($project->webhook_status)->toBe('failed')
-        ->and($project->webhook_message)->toContain('public HTTPS')
+    expect($project->webhook_status)->toBe('pending')
+        ->and($project->automatic_deployment)->toBeFalse()
         ->and($project->status)->toBe(ProjectStatus::Active)
         ->and($project->repository_name)->toBe('octocat/client-portal')
         ->and($project->repository_url)->toBe('https://github.com/octocat/client-portal')
@@ -146,6 +149,7 @@ it('creates a private Laravel repository from Create App and provisions its main
         && $request['private'] === true
         && $request['auto_init'] === false);
 
+    runQueuedPublicationForTests();
     expect(collect($commands)->first(fn (array $command): bool => ($command[0] ?? null) === 'composer'))
         ->toContain('laravel/laravel:^13.0', '--no-install', '--no-scripts', '--no-plugins');
 
@@ -238,10 +242,11 @@ it('uses the Laravel 12 starter when PHP 8.2 is selected', function () {
         ->call('save')
         ->assertHasNoErrors();
 
+    runQueuedPublicationForTests();
     expect($composerCommand)->toContain('laravel/laravel:^12.0');
 });
 
-it('keeps the form open and leaves no project when GitHub rejects repository creation', function () {
+it('preserves the project and shows a preparation failure when GitHub rejects repository creation', function () {
     Http::swap(new Factory);
     Http::preventStrayRequests();
     Http::fake(function (Request $request) {
@@ -276,10 +281,10 @@ it('keeps the form open and leaves no project when GitHub rejects repository cre
         ->set('phpVersion', '8.3')
         ->set('databaseEngine', 'mysql')
         ->call('save')
-        ->assertHasErrors('repositorySource')
-        ->assertSee('GitHub could not create the private repository');
-
-    expect(Project::query()->count())->toBe(0);
+        ->assertHasNoErrors();
+    runQueuedPublicationForTests();
+    expect(Project::query()->sole()->publication_status)->toBe('failed')
+        ->and(Project::query()->sole()->provisioning_log)->toContain('GitHub could not confirm repository creation');
 });
 
 it('retains a created private repository after an initial push failure without logging process output', function () {
@@ -321,6 +326,7 @@ it('retains a created private repository after an initial push failure without l
         ->call('save')
         ->assertHasNoErrors();
 
+    runQueuedPublicationForTests();
     $project = Project::query()->sole();
 
     expect($project->status)->toBe(ProjectStatus::Failed)

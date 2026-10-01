@@ -108,11 +108,16 @@ it('requires an active application database before deployment', function () {
 it('deploys the configured branch and stores its current commit', function () {
     $deployment = $this->project->deployments()->create(['status' => DeploymentStatus::Pending]);
     $commit = str_repeat('a', 40);
+    $commands = [];
+    $environmentBefore = $_ENV;
+    $_ENV['DB_CONNECTION'] = 'sqlite';
+    $_ENV['MANAGER_TEST_SECRET'] = 'manager-only-secret';
 
     Http::fake();
     Process::preventStrayProcesses();
-    Process::fake(function (PendingProcess $process) use ($commit) {
+    Process::fake(function (PendingProcess $process) use ($commit, &$commands) {
         $command = $process->command;
+        $commands[] = $command;
 
         if ($command === ['git', 'remote', 'get-url', 'origin']) {
             return Process::result(output: 'https://github.com/octocat/customer-portal.git');
@@ -130,6 +135,7 @@ it('deploys the configured branch and stores its current commit', function () {
     });
 
     DeployProject::dispatchSync($deployment->id);
+    $_ENV = $environmentBefore;
 
     $deployment->refresh();
 
@@ -148,6 +154,12 @@ it('deploys the configured branch and stores its current commit', function () {
     Process::assertRan(['/usr/bin/php8.2', 'artisan', 'migrate', '--force']);
     Process::assertRan(['/usr/bin/php8.2', 'artisan', 'optimize']);
     Process::assertRan(['/usr/bin/php8.2', 'artisan', 'queue:restart']);
+    expect(array_search(['/usr/bin/php8.2', 'artisan', 'config:clear'], $commands))
+        ->toBeLessThan(array_search(['/usr/bin/php8.2', 'artisan', 'migrate', '--force'], $commands));
+    expect(array_search(['/usr/bin/php8.2', 'artisan', 'migrate', '--force'], $commands))
+        ->toBeLessThan(array_search(['/usr/bin/php8.2', 'artisan', 'optimize:clear'], $commands));
+    Process::assertRan(fn ($process) => $process->command === ['/usr/bin/php8.2', 'artisan', 'migrate', '--force']
+        && $process->environment['DB_CONNECTION'] === false && $process->environment['MANAGER_TEST_SECRET'] === false);
     Process::assertRan(function (PendingProcess $process): bool {
         return ($process->command[1] ?? null) === 'fetch'
             && ! str_contains(implode(' ', $process->command), 'gho_deploy_test_token')

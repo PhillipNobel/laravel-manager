@@ -1,4 +1,4 @@
-<div class="space-y-8" @if ($deploymentInProgress || $sslProvisioning) wire:poll.10s @endif>
+<div class="space-y-8" @if ($deploymentInProgress || $sslProvisioning || $publicationInProgress) wire:poll.10s @endif>
     @error('managerUpdate')
         <p role="alert" class="rounded-md border border-destructive/30 px-4 py-3 text-sm text-destructive">{{ $message }}</p>
     @enderror
@@ -16,11 +16,16 @@
                 <p class="mt-1.5 break-all font-mono text-sm text-muted-foreground">{{ $project->domain }}</p>
             </div>
             <div class="self-start sm:self-auto">
-                <x-project-status :status="$project->status" />
+                @if ($project->publication_status)
+                            <april:badge :variant="$project->publication_status === 'failed' ? 'destructive' : 'secondary'">{{ $project->publication_status === 'ready' ? 'Ready' : ($project->publication_status === 'failed' ? 'Needs attention' : 'Preparing') }}</april:badge>
+                        @else
+                            <x-project-status :status="$project->status" />
+                        @endif
             </div>
         </div>
     </div>
 
+    @include('livewire.apps.publication')
     @include('livewire.apps.development-guide')
 
     <section aria-labelledby="domain-heading">
@@ -42,7 +47,7 @@
                     wire:click="configureDomain"
                     wire:loading.attr="disabled"
                     wire:target="configureDomain"
-                    :disabled="! $canConfigureDomain"
+                    :disabled="! $canConfigureDomain || $publicationInProgress"
                 >
                     <span wire:loading.remove wire:target="configureDomain">Configure Apache</span>
                     <span wire:loading wire:target="configureDomain">Configuring…</span>
@@ -134,7 +139,7 @@
                     wire:click="provisionDatabase"
                     wire:loading.attr="disabled"
                     wire:target="provisionDatabase"
-                    :disabled="! $canConfigureDatabase"
+                    :disabled="! $canConfigureDatabase || $publicationInProgress"
                 >
                     <span wire:loading.remove wire:target="provisionDatabase">{{ $databaseStatus === \App\Enums\DatabaseStatus::Failed ? 'Retry database setup' : 'Create database' }}</span>
                     <span wire:loading wire:target="provisionDatabase">Creating database…</span>
@@ -206,7 +211,7 @@
                 :disabled="! $canDeploy"
                 class="self-start sm:self-auto"
             >
-                <span wire:loading.remove wire:target="deploy">{{ $deploymentInProgress ? 'Deployment in progress' : 'Deploy now' }}</span>
+                <span wire:loading.remove wire:target="deploy">{{ $deploymentInProgress ? 'Deployment in progress' : ($project->publication_status === 'ready' ? 'Update app' : 'Deploy now') }}</span>
                 <span wire:loading wire:target="deploy">Queueing…</span>
             </april:button>
         </div>

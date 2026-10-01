@@ -2,6 +2,7 @@
 
 use App\Actions\Projects\ConfigureProjectWebhook;
 use App\Enums\ProjectStatus;
+use App\Livewire\Apps\Show;
 use App\Models\AppSetting;
 use App\Models\GitHubConnection;
 use App\Models\Project;
@@ -13,6 +14,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Validation\ValidationException;
+use Livewire\Livewire;
 
 beforeEach(function () {
     config(['services.github.webhook_secret' => null, 'manager.manager_url' => 'https://manager.example.com']);
@@ -54,6 +56,16 @@ it('creates an encrypted persistent secret and a push-only TLS-verified hook wit
     expect(AppSetting::where('key', 'github_webhook_secret_encrypted')->value('value'))->not->toBe($secret);
     Http::assertSent(fn ($r) => $r->method() === 'POST' && str_ends_with($r->url(), '/hooks')
         && $r['events'] === ['push'] && $r['config']['secret'] === $secret && $r['config']['insecure_ssl'] === '0');
+});
+
+it('configures a hook only after explicit automatic opt-in and preserves it on switching back to manual', function () {
+    run20FakeHooks();
+    Livewire::actingAs(User::factory()->create())->test(Show::class, ['project' => $this->project])
+        ->call('setDeploymentMode', 'automatic')->assertHasNoErrors()->assertSee('Configured');
+    expect($this->project->fresh()->automatic_deployment)->toBeTrue()->and($this->project->fresh()->webhook_id)->toBe(42);
+    Livewire::test(Show::class, ['project' => $this->project])->call('setDeploymentMode', 'manual')->assertHasNoErrors();
+    expect($this->project->fresh()->automatic_deployment)->toBeFalse()->and($this->project->fresh()->webhook_id)->toBe(42);
+    Http::assertNotSent(fn ($r) => $r->method() === 'DELETE');
 });
 
 it('reuses matching hooks and preserves unrelated ones', function () {
@@ -198,7 +210,7 @@ it('shows readable commands, local environment guidance and copy fallback on the
     $this->actingAs(User::factory()->create());
     $this->get(route('apps.show', $this->project))->assertOk()->assertSee('Develop locally')
         ->assertSee('Copy commands')->assertSee('Commands selected.')->assertSee('DB_CONNECTION=sqlite')
-        ->assertSee('Automatic deployment')->assertDontSee('test-token');
+        ->assertSee('Deployment mode')->assertDontSee('test-token');
 });
 
 it('blocks webhook configuration while a Manager update is queued', function () {

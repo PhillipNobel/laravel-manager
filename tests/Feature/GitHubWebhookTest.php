@@ -18,6 +18,15 @@ beforeEach(function () {
     Queue::fake();
 });
 
+it('ignores signed pushes for manual projects even when a GitHub hook remains configured', function () {
+    createWebhookProject(['automatic_deployment' => false, 'webhook_id' => 123, 'webhook_status' => 'verified']);
+    connectWebhookGitHubAccount();
+    postSignedGitHubWebhook($this, webhookPushPayload())->assertStatus(202)
+        ->assertExactJson(['status' => 'ignored', 'deployments_queued' => 0]);
+    expect(Deployment::count())->toBe(0);
+    Queue::assertNothingPushed();
+});
+
 it('queues deployments only for projects matching the GitHub repository and configured branch', function () {
     $mainProject = createWebhookProject();
     $secondMainProject = createWebhookProject([
@@ -278,6 +287,7 @@ function createWebhookProject(array $overrides = []): Project
         'repository_url' => 'https://github.com/octocat/customer-portal',
         'repository_name' => 'octocat/customer-portal',
         'branch' => 'main',
+        'automatic_deployment' => true,
         'status' => ProjectStatus::Active,
         'database_status' => DatabaseStatus::Active,
     ], $overrides));

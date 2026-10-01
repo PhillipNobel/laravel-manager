@@ -7,6 +7,7 @@ use App\Models\AppSetting;
 use App\Models\GitHubConnection;
 use App\Models\Project;
 use App\Support\InfrastructureLock;
+use App\Support\ProjectProcessEnvironment;
 use Illuminate\Contracts\Process\ProcessResult;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
@@ -81,12 +82,12 @@ class ProvisionProject
             try {
                 $clone = Process::path($applicationsRoot)
                     ->timeout(180)
-                    ->env([
+                    ->env(ProjectProcessEnvironment::clean([
                         'GIT_CONFIG_COUNT' => '1',
                         'GIT_CONFIG_KEY_0' => 'http.https://github.com/.extraheader',
                         'GIT_CONFIG_VALUE_0' => $authorization,
                         'GIT_TERMINAL_PROMPT' => '0',
-                    ])
+                    ]))
                     ->run(['git', 'clone', '--branch', $branch, '--single-branch', '--', $cloneUrl, $projectPath]);
             } catch (Throwable) {
                 throw new RuntimeException('GitHub clone failed or timed out.');
@@ -104,7 +105,7 @@ class ProvisionProject
             $this->setRuntimePermissions($projectPath);
 
             $project->update(['status' => ProjectStatus::Active]);
-            $this->appendLog($project, 'Application is ready.');
+            $this->appendLog($project, 'Application files prepared.');
         } catch (RuntimeException $exception) {
             $project->update(['status' => ProjectStatus::Failed]);
             $this->appendLog($project, $exception->getMessage());

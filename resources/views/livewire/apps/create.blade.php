@@ -175,7 +175,7 @@
             </p>
         @endif
 
-        <p class="rounded-md bg-muted/60 px-3.5 py-3 text-sm leading-6 text-muted-foreground">Laravel Manager prepares the app directory and production environment. For a new repository, it creates only the Laravel starter; dependencies are installed on deployment.</p>
+        <p class="rounded-md bg-muted/60 px-3.5 py-3 text-sm leading-6 text-muted-foreground">Laravel Manager prepares the repository, database, initial deployment, subdomain and HTTPS in the background. Wildcard DNS must already point to this server and ports 80/443 must be reachable. New apps use manual updates: push your changes, then click Update app.</p>
 
         <div class="flex flex-col-reverse gap-3 border-t border-border pt-5 sm:flex-row sm:justify-end">
             <april:button-link href="{{ route('apps.index') }}" variant="outline">Cancel</april:button-link>

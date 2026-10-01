@@ -190,9 +190,12 @@ def postgres_environment() -> dict[str, str]:
 
 def require_env_is_ignored(slug: str, unavailable_code: str = "MYSQL_UNAVAILABLE") -> None:
     root = load_applications_root(unavailable_code)
+    project = root / slug
+    if project.is_symlink() or not project.is_dir() or project.resolve() != project:
+        raise HelperError("INVALID_PROJECT")
     try:
         result = subprocess.run(
-            [GIT, "--no-pager", "-c", "core.fsmonitor=false", "check-ignore", "--quiet", "--", ".env"],
+            [GIT, "--no-pager", "-c", f"safe.directory={project}", "-c", "core.fsmonitor=false", "check-ignore", "--quiet", "--", ".env"],
             cwd=root / slug,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,

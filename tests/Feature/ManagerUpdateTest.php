@@ -142,4 +142,11 @@ it('installs only fixed launcher permissions and an independent update service',
     $syntax = new Symfony\Component\Process\Process(['/bin/bash', '-n', base_path('scripts/install-update-bridge.sh')]);
     $syntax->run();
     expect($syntax->isSuccessful())->toBeTrue();
+    $bootstrap = file_get_contents(base_path('scripts/install-update-bridge.sh'));
+    expect($bootstrap)->toContain('"$APP_DIR/scripts/laravel-manager-database" /usr/local/sbin/laravel-manager-database',
+        '"$APP_DIR/scripts/laravel-manager-apache" /usr/local/sbin/laravel-manager-apache',
+        '"$APP_DIR/scripts/laravel-manager-queue.service" /etc/systemd/system/laravel-manager-queue.service');
+    expect(file_get_contents(base_path('scripts/laravel-manager-queue.service')))->toContain(
+        'Environment=COMPOSER_HOME=/var/cache/laravel-manager/composer',
+        'Environment=npm_config_cache=/var/cache/laravel-manager/npm');
 });

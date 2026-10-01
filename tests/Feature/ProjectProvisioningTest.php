@@ -11,10 +11,12 @@ use Illuminate\Process\PendingProcess;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Livewire\Livewire;
 
 beforeEach(function () {
+    Queue::fake();
     $this->actingAs(User::factory()->create());
     $this->applicationsRoot = storage_path('framework/testing/apps-'.Str::uuid());
     Process::fake(fn (PendingProcess $process) => fakeAvailableServerCommand($process) ?? Process::result());
@@ -102,6 +104,7 @@ it('clones a selected repository and prepares a secure Laravel environment', fun
         ->call('save')
         ->assertHasNoErrors();
 
+    runQueuedPublicationForTests();
     $project = Project::query()->sole();
     $component->assertRedirect(route('apps.show', $project));
 
@@ -222,6 +225,7 @@ it('marks a failed clone failed without logging GitHub credentials', function ()
         ->call('save')
         ->assertHasNoErrors();
 
+    runQueuedPublicationForTests();
     $project = Project::query()->sole();
 
     expect($project->status)->toBe(ProjectStatus::Failed)
@@ -251,6 +255,7 @@ it('uses Git to reject an invalid branch before making the application directory
         ->call('save')
         ->assertHasNoErrors();
 
+    runQueuedPublicationForTests();
     $project = Project::query()->sole();
 
     expect($project->status)->toBe(ProjectStatus::Failed)
@@ -278,6 +283,7 @@ it('does not overwrite an existing application path', function () {
         ->call('save')
         ->assertHasNoErrors();
 
+    runQueuedPublicationForTests();
     $project = Project::query()->sole();
 
     expect($project->status)->toBe(ProjectStatus::Failed)
@@ -305,6 +311,7 @@ it('does not follow an existing application path symlink', function () {
         ->call('save')
         ->assertHasNoErrors();
 
+    runQueuedPublicationForTests();
     $project = Project::query()->sole();
 
     expect($project->status)->toBe(ProjectStatus::Failed)
@@ -344,6 +351,7 @@ it('marks a repository without Laravel files as failed', function () {
         ->call('save')
         ->assertHasNoErrors();
 
+    runQueuedPublicationForTests();
     $project = Project::query()->sole();
 
     expect($project->status)->toBe(ProjectStatus::Failed)

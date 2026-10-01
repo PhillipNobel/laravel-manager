@@ -21,7 +21,8 @@ class ManagerUpdateReady extends Command
         $busy = Deployment::query()->whereIn('status', [DeploymentStatus::Pending, DeploymentStatus::Running])->exists()
             || Project::query()->where('status', ProjectStatus::Provisioning)
                 ->orWhere('database_status', DatabaseStatus::Provisioning)
-                ->orWhere('ssl_status', SslStatus::Provisioning)->exists();
+                ->orWhere('ssl_status', SslStatus::Provisioning)
+                ->orWhereIn('publication_status', ['queued', 'running'])->exists();
 
         if ($busy) {
             $this->error('Finish queued or running application operations before updating.');

@@ -10,15 +10,15 @@ use App\Models\AppSetting;
 use App\Models\Deployment;
 use App\Models\GitHubConnection;
 use App\Models\Project;
+use App\Support\ApplicationHealthCheck;
 use App\Support\InfrastructureLock;
+use App\Support\ProjectProcessEnvironment;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
-use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
 use RuntimeException;
 use Throwable;
@@ -128,8 +128,9 @@ class DeployProject implements ShouldQueue
 
             $this->installFrontendDependencies($path);
 
-            $this->runCommand('Clearing Laravel caches', $path, [$phpBinary, 'artisan', 'optimize:clear'], 180);
+            $this->runCommand('Clearing Laravel configuration', $path, [$phpBinary, 'artisan', 'config:clear'], 180);
             $this->runCommand('Running database migrations', $path, [$phpBinary, 'artisan', 'migrate', '--force'], 300);
+            $this->runCommand('Clearing Laravel caches', $path, [$phpBinary, 'artisan', 'optimize:clear'], 180);
             $this->runCommand('Optimizing Laravel application', $path, [$phpBinary, 'artisan', 'optimize'], 180);
             $this->runCommand('Restarting Laravel queue workers', $path, [$phpBinary, 'artisan', 'queue:restart'], 180);
             $this->checkApplicationResponse($project);
@@ -361,28 +362,10 @@ class DeployProject implements ShouldQueue
             return;
         }
 
-        if (! is_string($project->domain)
-            || filter_var($project->domain, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) === false) {
-            throw new RuntimeException('The configured application domain is invalid for the health check.');
-        }
-
         $this->appendLog('Checking application response.');
+        $status = ApplicationHealthCheck::check($project);
 
-        try {
-            $response = Http::connectTimeout(3)
-                ->timeout(5)
-                ->withHeaders(['Host' => $project->domain])
-                ->withOptions(['allow_redirects' => false])
-                ->get('http://127.0.0.1/');
-        } catch (ConnectionException) {
-            throw new RuntimeException('The application did not respond to the health check after deployment.');
-        }
-
-        if ($response->serverError()) {
-            throw new RuntimeException('The application returned HTTP '.$response->status().' after deployment.');
-        }
-
-        $this->appendLog('Application responded with HTTP '.$response->status().'.');
+        $this->appendLog('Application responded with HTTP '.$status.'.');
     }
 
     private function runCommand(string $step, string $path, array $command, int $timeout, array $environment = []): string
@@ -390,11 +373,7 @@ class DeployProject implements ShouldQueue
         $this->appendLog($step.'.');
 
         try {
-            $process = Process::path($path)->timeout($timeout);
-
-            if ($environment !== []) {
-                $process = $process->env($environment);
-            }
+            $process = Process::path($path)->timeout($timeout)->env(ProjectProcessEnvironment::clean($environment));
 
             $result = $process->run($command);
         } catch (Throwable) {

@@ -2,9 +2,7 @@
 
 namespace App\Livewire\Apps;
 
-use App\Actions\Projects\ConfigureProjectWebhook;
-use App\Actions\Projects\CreateProjectRepository;
-use App\Actions\Projects\ProvisionProject;
+use App\Actions\Projects\QueueProjectPublication;
 use App\Enums\DatabaseEngine;
 use App\Enums\ProjectStatus;
 use App\Models\AppSetting;
@@ -14,6 +12,8 @@ use App\Support\DomainGenerator;
 use App\Support\GitHubApi;
 use App\Support\InfrastructureLock;
 use App\Support\ServerEnvironment;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Process;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 use Livewire\Attributes\Computed;
@@ -21,7 +21,6 @@ use Livewire\Attributes\Layout;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\Title;
 use Livewire\Component;
-use RuntimeException;
 use Throwable;
 
 #[Layout('layouts.app')]
@@ -158,12 +157,12 @@ class Create extends Component
         return DomainGenerator::generate($this->subdomain, AppSetting::valueFor('base_domain'));
     }
 
-    public function save(GitHubApi $github, CreateProjectRepository $createProjectRepository, ProvisionProject $provisionProject): void
+    public function save(GitHubApi $github, QueueProjectPublication $publication): void
     {
-        InfrastructureLock::run(fn () => $this->executeSave($github, $createProjectRepository, $provisionProject));
+        InfrastructureLock::run(fn () => $this->executeSave($github, $publication));
     }
 
-    private function executeSave(GitHubApi $github, CreateProjectRepository $createProjectRepository, ProvisionProject $provisionProject): void
+    private function executeSave(GitHubApi $github, QueueProjectPublication $publication): void
     {
         $this->name = trim($this->name);
         $this->subdomain = strtolower(trim($this->subdomain));
@@ -218,52 +217,39 @@ class Create extends Component
 
         $baseDomain = AppSetting::valueFor('base_domain');
 
-        $project = Project::query()->create([
-            'name' => $validated['name'],
-            'slug' => strtolower($validated['subdomain']),
-            'domain' => DomainGenerator::generate($validated['subdomain'], $baseDomain),
-            'repository_url' => $repository['url'] ?? null,
-            'repository_name' => $repository['full_name'] ?? null,
-            'branch' => $validated['branch'],
-            'php_version' => $validated['phpVersion'],
-            'database_engine' => $databaseEngine,
-            'status' => ProjectStatus::Pending,
-        ]);
-
-        if ($validated['repositorySource'] === 'new') {
+        if (app()->environment('production')) {
             try {
-                $repository = $createProjectRepository->handle($project, $connection);
-            } catch (Throwable $exception) {
-                $project->refresh();
-
-                if ($project->repository_name === null) {
-                    $project->delete();
-                    $message = $exception instanceof RuntimeException
-                        ? $exception->getMessage()
-                        : 'GitHub could not create the private repository. Check the connected account and try again.';
-                    $this->addError('repositorySource', $message);
-
-                    return;
-                }
-
-                $project->update([
-                    'status' => ProjectStatus::Failed,
-                    'provisioning_log' => $exception instanceof RuntimeException
-                        ? $exception->getMessage()
-                        : 'The private repository was created, but its initial push failed. Check GitHub access and try again.',
-                ]);
-
-                $this->redirect(route('apps.show', $project));
+                $workerReady = Process::timeout(2)->run(['/usr/bin/systemctl', 'is-active', '--quiet', 'laravel-manager-queue.service'])->successful();
+            } catch (Throwable) {
+                $workerReady = false;
+            }
+            if (! $workerReady) {
+                $this->addError('repositorySource', 'Start the Laravel Manager database queue worker before creating an application.');
 
                 return;
             }
         }
 
-        $provisionProject->handle($project, $repository, $connection);
+        $project = DB::transaction(function () use ($validated, $repository, $databaseEngine, $baseDomain, $publication): Project {
+            $project = Project::query()->create([
+                'name' => $validated['name'],
+                'slug' => strtolower($validated['subdomain']),
+                'domain' => DomainGenerator::generate($validated['subdomain'], $baseDomain),
+                'repository_url' => $repository['url'] ?? null,
+                'repository_name' => $repository['full_name'] ?? null,
+                'branch' => $validated['branch'],
+                'php_version' => $validated['phpVersion'],
+                'database_engine' => $databaseEngine,
+                'status' => ProjectStatus::Pending,
+                'repository_source' => $validated['repositorySource'],
+                'repository_initialized' => $validated['repositorySource'] === 'existing',
+                'automatic_deployment' => false,
+            ]);
 
-        if ($project->fresh()->status === ProjectStatus::Active) {
-            app(ConfigureProjectWebhook::class)->handle($project);
-        }
+            $publication->handle($project, auth()->id());
+
+            return $project;
+        });
 
         $this->redirect(route('apps.show', $project));
     }

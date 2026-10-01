@@ -1,5 +1,7 @@
 <?php
 
+use App\Jobs\PublishProject;
+use App\Models\Project;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Process\PendingProcess;
 use Illuminate\Support\Facades\Process;
@@ -35,4 +37,17 @@ function fakeAvailableServerCommand(PendingProcess $process)
     }
 
     return null;
+}
+
+function runQueuedPublicationForTests(): void
+{
+    for ($i = 0; $i < 8; $i++) {
+        $projects = Project::where('publication_status', 'queued')->get();
+        if ($projects->isEmpty()) {
+            return;
+        }
+        foreach ($projects as $project) {
+            (new PublishProject($project->id, auth()->id(), $project->publication_version))->handle();
+        }
+    }
 }

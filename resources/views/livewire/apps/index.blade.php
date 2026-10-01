@@ -56,7 +56,11 @@
                             <td class="px-4 py-3.5"><span class="block truncate text-muted-foreground">{{ $project->repository_name ?: 'Not connected' }}</span></td>
                             <td class="px-4 py-3.5"><span class="block truncate text-muted-foreground">{{ $project->branch }}</span></td>
                             <td class="px-4 py-3.5 text-muted-foreground">{{ $project->php_version ?: '—' }}</td>
-                            <td class="px-4 py-3.5"><x-project-status :status="$project->status" /></td>
+                            <td class="px-4 py-3.5">@if ($project->publication_status)
+                            <april:badge :variant="$project->publication_status === 'failed' ? 'destructive' : 'secondary'">{{ $project->publication_status === 'ready' ? 'Ready' : ($project->publication_status === 'failed' ? 'Needs attention' : 'Preparing') }}</april:badge>
+                        @else
+                            <x-project-status :status="$project->status" />
+                        @endif</td>
                         </tr>
                     @endforeach
                 </tbody>
@@ -71,7 +75,11 @@
                             <a href="{{ route('apps.show', $project) }}" class="block truncate font-medium underline-offset-4 hover:underline">{{ $project->name }}</a>
                             <p class="mt-1 truncate font-mono text-xs text-muted-foreground">{{ $project->domain }}</p>
                         </div>
-                        <x-project-status :status="$project->status" />
+                        @if ($project->publication_status)
+                            <april:badge :variant="$project->publication_status === 'failed' ? 'destructive' : 'secondary'">{{ $project->publication_status === 'ready' ? 'Ready' : ($project->publication_status === 'failed' ? 'Needs attention' : 'Preparing') }}</april:badge>
+                        @else
+                            <x-project-status :status="$project->status" />
+                        @endif
                     </div>
                     <div class="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                         <span>Repository: {{ $project->repository_name ?: 'Not connected' }}</span>

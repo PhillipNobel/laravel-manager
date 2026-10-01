@@ -1,5 +1,11 @@
 # Test Context
 
+## RUN 21 initial publication and manual updates
+
+Fake every GitHub, Process and HTTP call in automated Laravel tests. Exercise the queued coordinator one stage at a time, with ID/version-only payloads, real temporary private .env files and faked deployment commands. Assert ordering, final URL/owner/mode/secret preservation, failure/interruption/retry, stale job suppression, duplicate request blocking, manual signed push filtering, automatic opt-in, legacy backfill and Manager update locking. Child command environments must remove Manager settings/secrets while preserving OS/cache variables and explicit Git-only credentials. Migrate before clearing database-backed caches on the first deploy. phpunit.xml pins in-memory SQLite and fixed helper/domain/root test defaults even on the VM.
+
+Python helper regression tests mock subprocesses and use temporary directories only; never contact MySQL or invoke a root helper in the suite. VM smoke verification separately uses isolated application/database copies, controlled local Git remotes, fixed temporary sudoers and local test certificate issuance. Run actual Composer/npm/PHP/MySQL/Apache there as the intended users, preserve installed Manager data and distinguish real HTTP/TLS serving from simulated GitHub/Let's Encrypt issuance. Verify fixed updater bootstrap file installation into isolated destinations; never publish unfinished source just to run an update.
+
 ## RUN 13 first-run setup
 
 Setup route tests authenticate the existing administrator, check incomplete/completed routing, validate server defaults, and protect setup progress. Fake every local Process check; never install software, call DNS/GitHub from the tests, or invoke infrastructure helpers. GitHub is optional and the wildcard DNS step records the administrator's manual confirmation only.

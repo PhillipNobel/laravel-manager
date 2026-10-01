@@ -4,7 +4,7 @@ Laravel Manager is a self-hosted web application for managing Laravel applicatio
 
 ## Project status
 
-RUN 01 through RUN 20 are complete. A first-run setup guides the administrator through server defaults, read-only environment checks, optional GitHub connection, and manual wildcard DNS confirmation before opening Apps. Settings hold this server's identity, Laravel app defaults, and GitHub connection. The protected Server page shows local environment details and read-only software and service checks. Create App lets the administrator choose PHP 8.2, 8.3, or 8.4 and MySQL or PostgreSQL for each app. Protected Project actions configure its PHP-FPM virtual host, create and verify a dedicated database, deploy manually or after a matching GitHub push, and enable HTTPS with Let's Encrypt. The authenticated header offers System, Light, and Dark themes; an explicit choice is saved in the current browser.
+RUN 01 through RUN 21 are complete. First-run setup guides the administrator through server defaults, environment checks, optional GitHub connection and wildcard DNS confirmation. Create App chooses PHP 8.2, 8.3, or 8.4 and MySQL or PostgreSQL, then prepares the repository, files, dedicated database, initial deployment, Apache subdomain and HTTPS in the database queue. Project shows progress, safe retry, local development instructions and **Update app**. New apps use manual updates; existing apps retain their previous automatic deployment setting. The authenticated header offers System, Light and Dark themes saved in the current browser.
 
 Laravel Manager itself stays on PHP 8.3 and uses MySQL in production. The server installer installs the supported app PHP-FPM runtimes and database services up front. Create App shows unavailable choices as disabled with the missing requirement; it never installs server packages from a web request.
 
@@ -273,7 +273,7 @@ Settings lists up to 100 repositories sorted by recent activity, with visibility
 
 ## Creating an application
 
-Connect GitHub in **Settings**, then open **Apps → Create App**. Enter an application name and subdomain, then choose either an existing repository or **Create a new private repository**. New repository names come from the subdomain and appear under the connected GitHub account; they start on `main`. Laravel Manager creates a Laravel starter compatible with the selected PHP version, commits it, creates a private GitHub repository, pushes `main`, then provisions the project from that repository. PHP 8.2 uses Laravel 12; PHP 8.3 and 8.4 use Laravel 13. Composer does not install dependencies or run scripts during app creation; deployment installs dependencies later. If GitHub created the repository but the push failed, the failed Project retains the repository link so the failure can be investigated without losing the remote repository.
+Connect GitHub in **Settings**, then open **Apps → Create App**. Enter an application name and subdomain, then choose either an existing repository or **Create a new private repository**. New repository names come from the subdomain and appear under the connected GitHub account; they start on `main`. Laravel Manager creates a Laravel starter compatible with the selected PHP version, commits it, creates a private GitHub repository, pushes `main`, then provisions the project from that repository. PHP 8.2 uses Laravel 12; PHP 8.3 and 8.4 use Laravel 13. Repository scaffolding only fetches the official starter without dependencies or scripts; the following queued initial deployment installs dependencies and runs application commands. If GitHub created the repository but the push failed, the failed Project retains the repository link so the failure can be investigated without losing the remote repository.
 
 For an existing repository, choose its branch, PHP version, and database engine. The branch defaults to the selected repository's default branch. The domain is generated from the configured base applications domain. PHP and database options that are missing a server prerequisite remain visible but disabled, with the needed package or service shown beside the control. Laravel Manager checks those requirements again when saving, so a browser request cannot bypass the disabled state.
 
@@ -285,9 +285,9 @@ Laravel Manager rechecks repository access, validates the branch, then clones th
 
 It refuses to overwrite an existing path. The configured applications directory must be writable by the operating-system user running Laravel Manager. New application and runtime directories receive restrictive, explicit permissions; generated `.env` files are owner-only (`0600`). The production installer creates `/var/www/apps` for `www-data` and configures PHP-FPM access.
 
-For a repository with `artisan`, `composer.json`, and `.env.example`, Laravel Manager creates `.env` with a fresh application key, `APP_ENV=production`, `APP_DEBUG=false`, and the generated application URL. The GitHub token is supplied only through temporary Git process configuration and is not stored in the repository, project record, or provisioning log. For a new repository, Composer only fetches the official Laravel starter; dependency installation, plugins, scripts, Artisan, npm, and repository-provided code do not run during app creation. Existing repositories are cloned without running their code. Use **Deploy now** after database setup to install dependencies and run application commands.
+For a repository with `artisan`, `composer.json`, and `.env.example`, Laravel Manager creates `.env` with a fresh application key, `APP_ENV=production`, `APP_DEBUG=false`, and the generated application URL. The GitHub token is supplied only through temporary Git process configuration and is not stored in the repository, project record, or provisioning log. Scaffolding and cloning do not execute repository code. The queued initial deployment subsequently installs dependencies, builds assets and runs migrations before Apache/HTTPS publication. Legacy projects keep their separate setup and Deploy now controls.
 
-The Project page shows the current status, path, and bounded provisioning log. If creation fails, fix the repository or server path and choose an unused subdomain for another attempt; the failed project's domain remains recorded.
+The Project page shows publication progress, path and bounded logs. Fix the failed stage and use Retry preparation; successful work remains intact. A partial clone or ambiguous repository/database creation can require administrator review before retrying.
 
 ## Apache domains
 
@@ -324,7 +324,7 @@ Certbot packages provide an automatic renewal schedule through cron or a systemd
 
 Let's Encrypt's HTTP-01 check needs the application's public hostname to resolve to this VPS and inbound TCP 80 to reach Apache; see the [HTTP-01 challenge requirements](https://letsencrypt.org/docs/challenge-types/#http-01-challenge). Ensure the hostname's A/AAAA records point only to working public addresses. Allow TCP 443 for visitors after the HTTPS virtual host is enabled. The Manager checks the certificate hostname and expiry; it does not validate Cloudflare DNS settings.
 
-After deploying an update, refresh the root-owned helper and its narrow sudo rule using the Apache installation commands above, then validate the rule with `sudo visudo -cf /etc/sudoers.d/laravel-manager-apache`. The helper does not run Certbot from a web request: Laravel queues the operation, and the queue worker calls only the allowlisted helper. Tests fake that process call and render Apache templates without contacting Let's Encrypt or modifying a server.
+Manager updates refresh the root-owned helper automatically. For manual repairs, use the Apache installation commands above and validate the narrow rule with `sudo visudo -cf /etc/sudoers.d/laravel-manager-apache`. The helper does not run Certbot from a web request: Laravel queues the operation, and the queue worker calls only the allowlisted helper. Tests fake that process call and render Apache templates without contacting Let's Encrypt or modifying a server.
 
 ## Application databases
 
@@ -348,23 +348,23 @@ The helper refuses to take over a matching database or user/role that already ex
 
 ## Manual deployments
 
-On a provisioned Project page, choose **Deploy now** to queue a deployment of the configured branch. Laravel Manager uses the database queue. Run this worker locally; on a production installation, RUN 11 configures a persistent systemd worker as `www-data`:
+On a Ready Project page, choose **Update app** after pushing to queue a deployment of the saved branch. Legacy apps retain **Deploy now**. Initial publication explicitly uses the database queue. Run this worker locally; production installations configure a persistent systemd worker as `www-data`:
 
 ```bash
-php artisan queue:work --timeout=3600 --tries=1
+php artisan queue:work database --timeout=3600 --tries=1
 ```
 
 The queue's `retry_after` defaults to 3660 seconds, longer than the deployment job timeout. The job prevents a second pending or running deployment for the same app, records status, timestamps, commit hash/message, and bounded output, and marks failures for review. The page refreshes while a deployment is pending or running.
 
-Each deployment fetches the latest configured GitHub branch, verifies the repository and `.env` handling, checks out the commit, runs Composer under the Project's selected PHP binary, runs `npm ci` (or `npm install` without a lockfile) when `package.json` exists, and runs `npm run build` when that script exists. It then uses that PHP binary for Laravel cache, migration, optimization, and queue restart commands. Every operating-system process uses Laravel's Process API with a fixed argument array and a bounded timeout. The GitHub token is passed only through temporary Git environment configuration; deployment output redacts it and values from secret `.env` keys.
+Each deployment fetches the saved GitHub branch, verifies the repository and `.env`, checks out the commit, installs Composer dependencies under the selected PHP binary, installs npm dependencies and builds frontend assets. It clears cached configuration, runs migrations before clearing database-backed caches, then optimizes the app and restarts its workers. Child processes remove inherited Manager configuration and secrets so the app loads its own `.env`. The production worker uses writable Composer/npm caches under `/var/cache/laravel-manager`. Every process uses fixed argument arrays and bounded timeouts. GitHub credentials remain in transient Git environment configuration; stored output redacts tokens and secret app environment values.
 
 Deployments require an active application and database plus a connected GitHub account. They update the application's checkout in place. When the Apache domain is active, Laravel Manager checks the app with a bounded `GET http://127.0.0.1/` request and the app's domain in the `Host` header. Redirects are not followed, so this check does not depend on public DNS or HTTPS. A connection failure or HTTP 5xx marks deployment failed; an HTTP response below 500, including a redirect or 404, confirms that the app responded. The health check is skipped until Apache reports the domain active.
 
-Use **Deploy now** to retry a failed deployment; it fetches the latest configured branch again. Deployments remain in place, without rollback or atomic release directories. Reverting application code alone cannot safely undo database migrations, and release directories would add complexity to the current deployment flow. Pest fakes every process and HTTP request; tests never deploy to a real application or server.
+Use **Update app** (or legacy **Deploy now**) to retry a failed deployment; it fetches the latest configured branch again. Deployments remain in place, without rollback or atomic release directories. Reverting application code alone cannot safely undo database migrations, and release directories would add complexity to the current deployment flow. Pest fakes every process and HTTP request; tests never deploy to a real application or server.
 
 ## Automatic GitHub deployments
 
-Use **Project → Configure webhook** for automatic configuration; see the setup section below for requirements and verification.
+New apps default to **Manual updates**. For automatic deployment, explicitly select **Project → Automatic updates**; see the setup section below for requirements and verification. Switching back to Manual immediately prevents signed pushes from queuing new deployments, preserves GitHub hooks and does not cancel a deployment already accepted.
 
 ### Manual hook setup (optional)
 
@@ -380,17 +380,17 @@ In the GitHub repository, add a webhook with this payload URL, content type `app
 https://YOUR-MANAGER-HOST/webhooks/github
 ```
 
-Laravel Manager checks `X-Hub-Signature-256` against the exact raw request body. A signed push queues each ready project configured for the payload's exact repository and branch. Other events, branches, deleted branches, and unmatched repositories are acknowledged without deployment. A unique delivery ID and SHA-256 body fingerprint prevent duplicate or replayed bodies from queueing twice, even if the unsigned delivery header changes. Keep the Laravel database queue worker running as shown above.
+Laravel Manager checks `X-Hub-Signature-256` against the exact raw request body. A signed push queues each ready automatic project configured for the payload's exact repository and branch. Other events, branches, deleted branches, and unmatched repositories are acknowledged without deployment. A unique delivery ID and SHA-256 body fingerprint prevent duplicate or replayed bodies from queueing twice, even if the unsigned delivery header changes. Keep the Laravel database queue worker running as shown above.
 
 Signed delivery records contain the GitHub delivery ID, body fingerprint, event, repository, branch ref, outcome, and number of deployments queued. The request body and signature are not stored. Invalid signatures are rejected without creating a delivery record.
 
-RUN 20 configures repository webhooks through the GitHub API; the manual setup above remains available for installations with an explicitly configured signing secret. RUN 10 adds a post-deployment health check for active Apache domains. Retry remains a manual **Deploy now** action; automatic retries and rollback are not enabled.
+RUN 20 configures repository webhooks through the GitHub API; the manual setup above remains available for installations with an explicitly configured signing secret. RUN 10 adds a post-deployment health check for active Apache domains. Retry remains a manual **Update app** (or legacy **Deploy now**) action; automatic retries and rollback are not enabled.
 
 ### Automatic webhook setup and local development
 
 Set **Settings → Manager URL** to your public HTTPS origin, for example `https://manager.philcode.dev.br` (no path or port). The certificate must be valid, port 443 reachable, and the connected GitHub account must have administrator access to the repository. The existing OAuth `repo` scope is reused; no second integration is required.
 
-Create App attempts to configure the hook after successful provisioning. Existing apps use **Configure webhook** on their detail page. Manager configures an active push-only JSON hook with TLS verification. A compatible hook is reused; conflicting or unrelated hooks are preserved. **Check connection / retry** rechecks configuration and requests another ping. Webhook failure preserves the repository and provisioned app.
+Selecting **Automatic updates** attempts hook configuration. Existing automatic apps retain their preference after migration and can use **Configure webhook**. Manager configures an active push-only JSON hook with TLS verification. Compatible hooks are reused; unrelated/conflicting hooks are preserved. **Check connection / retry** rechecks configuration and requests a ping. Hook failure preserves the app and remains separate from initial publication status.
 
 **Configured** means GitHub accepted the configuration. **Verified** means a correctly signed ping for that repository and hook reached Manager. A ping never deploys. If verification is pending, check the public Manager URL, DNS, valid certificate, subnet/host firewall port 443, and GitHub → Repository → Settings → Webhooks → Recent deliveries. A locally simulated ping is not evidence of public GitHub delivery.
 
@@ -400,8 +400,21 @@ The Project page's **Develop locally** section provides selectable/copyable inst
 
 For local SQLite, set `APP_ENV=local`, `APP_DEBUG=true`, `APP_URL=http://localhost:8000`, `DB_CONNECTION=sqlite`, and `QUEUE_CONNECTION=sync`. Remove `DB_URL`, `DB_DATABASE`, `DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_PASSWORD`, and `DB_SOCKET` to use Laravel's default `database/database.sqlite`. Copy `.env.example` only when `.env` does not already exist; never copy server credentials. Generate the key, create the SQLite file and run migrations once during initial setup. Confirm `.env` is ignored by Git. On later days, start Laravel/Vite, develop, commit and push the configured branch.
 
-Before relying on pushes, finish the application's database, Apache domain, HTTPS and initial **Deploy now** steps using the existing controls. Keep the server queue worker running. Only matching signed branch pushes queue deployments; inspect deployment history for success or failure. Webhook configuration does not provision these requirements automatically.
+New apps prepare their database, initial deployment, Apache domain and HTTPS automatically. Wait for **Ready** before using Update app. Legacy projects retain their existing setup controls. Keep the server queue worker running. Only automatic projects with matching signed branch pushes queue deployments; inspect deployment history for the result.
 
 ## Roadmap
 
-See [RUNS.md](RUNS.md). RUN 01 through RUN 20 are complete. Do not begin another RUN until explicitly requested.
+See [RUNS.md](RUNS.md). RUN 01 through RUN 21 are complete. Do not begin another RUN until explicitly requested.
+
+
+### Publish on creation, update manually
+
+[RUN 21](RUNS.md#run-21--publish-on-creation-and-update-manually--complete) prepares the database, initial deployment, subdomain and HTTPS during app creation. Before creating an app, connect GitHub, configure the applications domain/root, confirm wildcard DNS points to this VPS, allow public ports 80/443 in both provider and host firewalls, and keep the database queue worker active. Production creation rejects an inactive Manager worker. No Cloudflare record is created by Manager.
+
+Select **Create a new private repository** to create the official Laravel starter on `main`, or choose an existing Laravel repository and its saved branch. The queued clone verifies that existing branch; a missing branch fails preparation safely. Project displays each stage and becomes **Ready** only after deployment, Apache, the local HTTP response check and HTTPS succeed. The subdomain serves the last deployed checkout, not live GitHub contents. Then clone using **Develop locally**, develop, push and click **Update app**.
+
+**Retry preparation** resumes the failed stage and preserves successful files/database/deployment stages and credentials. HTTPS failure retains the working HTTP site and does not claim Ready. Existing checkout directories are never overwritten. Ambiguous GitHub repository creation or a partial clone/database operation may require administrator review; retry never allocates another repository, recreates an existing database or force-pushes. Deployment remains in place, with no automatic migration rollback. If preparation is queued, check `sudo systemctl status laravel-manager-queue`; after an interruption, restore the worker and use Retry preparation when failure is recorded.
+
+To receive this RUN on an existing VPS, use **Settings → Manager updates** or `sudo /usr/local/bin/laravel-manager update`. The existing updater refreshes the root-owned Apache/database helpers and queue unit, including writable Composer/npm caches, through its fixed bootstrap. It preserves `.env`, keys, database credentials and existing root helper settings; no reinstall is required. Existing Projects keep their previous automatic preference; new ones default to manual.
+
+VM verification used real Git, Composer/npm, MySQL, PHP-FPM, Apache and manual updates with an isolated local Git remote. GitHub API metadata and certificate issuance used fixtures; HTTP/TLS serving was real. Public GitHub delivery and a production Let's Encrypt certificate are not claimed by that local test.

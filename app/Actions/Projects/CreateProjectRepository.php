@@ -6,6 +6,7 @@ use App\Models\GitHubConnection;
 use App\Models\Project;
 use App\Support\GitHubApi;
 use App\Support\InfrastructureLock;
+use App\Support\ProjectProcessEnvironment;
 use Illuminate\Process\PendingProcess;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Process;
@@ -25,6 +26,9 @@ class CreateProjectRepository
     private function executeHandle(Project $project, GitHubConnection $connection): array
     {
         $this->validateConnection($connection);
+        if ($project->repository_creation_attempted && ! $project->repository_name) {
+            throw new RuntimeException('A repository creation request was already made. Verify its result in GitHub before reconnecting it as an existing repository; no duplicate request was sent.');
+        }
 
         $stagingRoot = $this->stagingRoot();
         $starterPath = $stagingRoot.DIRECTORY_SEPARATOR.'starter-'.Str::uuid();
@@ -61,15 +65,25 @@ class CreateProjectRepository
                 'The initial Laravel starter commit could not be created.',
             );
 
-            try {
-                $repository = $this->github->createPrivateRepository(
-                    $connection->access_token,
-                    $connection->login,
-                    $project->slug,
-                    $project->name,
-                );
-            } catch (Throwable) {
-                throw new RuntimeException('GitHub could not create the private repository. Check the connected account permissions and whether the name is already in use.');
+            if ($project->repository_name) {
+                $expected = $connection->login.'/'.$project->slug;
+                $details = $this->github->repository($connection->access_token, $expected);
+                if ($project->repository_name !== $expected || $project->repository_url !== 'https://github.com/'.$expected
+                    || ($details['full_name'] ?? null) !== $expected || ($details['private'] ?? null) !== true
+                    || data_get($details, 'permissions.admin') !== true) {
+                    throw new RuntimeException('The saved starter repository could not be verified.');
+                }
+                $repository = ['full_name' => $expected, 'url' => 'https://github.com/'.$expected,
+                    'clone_url' => 'https://github.com/'.$expected.'.git'];
+            } else {
+                $project->update(['repository_creation_attempted' => true]);
+                try {
+                    $repository = $this->github->createPrivateRepository(
+                        $connection->access_token, $connection->login, $project->slug, $project->name,
+                    );
+                } catch (Throwable) {
+                    throw new RuntimeException('GitHub could not confirm repository creation. Review the requested repository name in GitHub; no automatic duplicate creation will be attempted.');
+                }
             }
 
             $project->update([
@@ -88,6 +102,8 @@ class CreateProjectRepository
                 ['git', 'push', '--set-upstream', 'origin', 'main'],
                 'The private GitHub repository was created, but the initial push failed. The repository is saved on this Project; check GitHub access and try again.',
             );
+
+            $project->update(['repository_initialized' => true]);
 
             return $repository;
         } finally {
@@ -160,7 +176,7 @@ class CreateProjectRepository
     private function run(PendingProcess $process, array $command, string $failure): void
     {
         try {
-            $result = $process->run($command);
+            $result = $process->env(ProjectProcessEnvironment::clean($process->environment))->run($command);
         } catch (Throwable) {
             throw new RuntimeException($failure);
         }

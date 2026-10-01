@@ -10,6 +10,8 @@ Group=www-data
 WorkingDirectory=/opt/laravel-manager
 Environment=APP_ENV=production
 Environment=HOME=/var/www
+Environment=COMPOSER_HOME=/var/cache/laravel-manager/composer
+Environment=npm_config_cache=/var/cache/laravel-manager/npm
 ExecStart=/usr/bin/php /opt/laravel-manager/artisan queue:work database --sleep=3 --tries=1 --timeout=3600 --max-time=3600
 Restart=always
 RestartSec=5

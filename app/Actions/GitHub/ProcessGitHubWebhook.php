@@ -97,6 +97,7 @@ class ProcessGitHubWebhook
             $projects = Project::query()
                 ->where('repository_name', $repositoryName)
                 ->where('branch', $branch)
+                ->where('automatic_deployment', true)
                 ->get();
 
             if ($projects->isEmpty()) {
@@ -108,7 +109,7 @@ class ProcessGitHubWebhook
 
             foreach ($projects as $project) {
                 try {
-                    $this->queueProjectDeployment->handle($project);
+                    $this->queueProjectDeployment->handle($project, true, true);
                     $queued++;
                 } catch (ValidationException) {
                     $skipped++;
